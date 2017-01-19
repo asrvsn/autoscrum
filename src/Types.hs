@@ -64,24 +64,27 @@ data Thread = Thread {
   , threadBlocks :: [RecordID]
   , threadStoryPts :: Double
   , threadAssignable :: Bool
+  , threadFinished :: Bool
   }
 
 instance FromJSON Thread where 
-  parseJSON (Object v) = do
-    assignable' <- v .: "Assignable?"
-    let assignable = case assignable of 
-                        Number n -> n == fromInteger 1
-                        _ -> error "thread assignable value is non-number"
+  parseJSON (Object v) = 
     Thread <$> v .: "Thread name"
            <*> v .: "Contained in"
            <*> v .: "Blocks"
-           <*> v .:? "Story pts" .!= 42
-           <*> pure assignable
+           <*> v .:? "Story pts" .!= 42 -- what the hell should this default be 
+           <*> (boolField <$> v .: "Assignable?")
+           <*> (boolField <$> v .: "Done?")
+    where
+      boolField = \case
+        Number n -> n == fromInteger 1
+        _ -> error "boolean field is non-number"
+
 
 data Containment = Containment {
     parentThread :: RecordID
-  , subThread :: RecordID
-  , containmentProbability :: Int
+  , childThread :: RecordID
+  , containmentProbability :: Double -- [0,1]
   }
 
 instance FromJSON Containment where
@@ -89,12 +92,12 @@ instance FromJSON Containment where
     [parent] <- v .: "Thread"
     [child] <- v .: "Subthread"
     prob <- v .: "Effective P(needed)"
-    return $ Containment parent child prob
+    return $ Containment parent child (prob / 100)
 
 data Block = Block { 
     blockingThread :: RecordID
   , blockedThread :: RecordID
-  , percentageBlocked :: Int
+  , blockPercentage :: Double -- [0,1]
   }
 
 instance FromJSON Block where
@@ -102,12 +105,12 @@ instance FromJSON Block where
     [blocking] <- v .: "Blocking thread"
     [blocked] <- v .: "Blocked thread"
     percent <- v .:? "% blocked" .!= 100
-    return $ Block blocking blocked percent
+    return $ Block blocking blocked (percent / 100)
 
 data Velocity = Velocity {
     vDeveloper :: RecordID
   , vTag :: RecordID
-  , vMultiplier :: Double
+  , vMultiplier :: Double -- [0,1]
   }
 
 instance FromJSON Velocity where

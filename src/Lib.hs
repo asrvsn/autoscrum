@@ -8,6 +8,9 @@ import Types
 import System.Random
 
 import Data.Monoid
+import qualified Data.HashMap.Strict as Map
+
+import Bayes.BayesianNetwork
 
 -- API methods
 
@@ -47,13 +50,37 @@ selectWhere tbl f = filter (uncurry f) (toList tbl)
 foreign :: (a -> RecordID) -> Table a -> Table b -> RecordID -> b
 foreign key tblA tblB rec = select tblB $ key (select tblA rec)
 
--- Specific methods
+-- Helpers
 
 devTags :: Table Velocity
         -> Developer
         -> [TagID] 
 devTags velTbl = 
   map (TagID . vTag . select velTbl) . devVelocities 
+
+getChildren :: Table Containment
+            -> ThreadID 
+            -> [ThreadID]
+getChildren cntTbl thrId = 
+  map childThread $ 
+    selectWhere cntTbl $ \_ cnt -> 
+      parentThread cnt == thrId
+
+getParents :: Table Containment 
+           -> ThreadID  
+           -> [ThreadID]
+getParents cntTbl thrId = 
+  map parentThread $ 
+    selectWhere cntTbl $ \_ cnt -> 
+      childThread cnt == thrId
+
+getBlockedThreads :: Table Block 
+                  -> ThreadID
+                  -> [(ThreadID, Double)]
+getBlockedThreads blkTbl thrId = 
+  map (\blk -> (blockedThread blk, blockPercentage blk)) $ 
+    selectWhere blkTbl $ \_ blk -> 
+      blockingThread blk == thrId
 
 -- Computation
 
@@ -81,35 +108,42 @@ taskCompletionTime tagTbl thrTbl devTbl velTbl (ThreadID thrId) (DevID devId) =
 
 blockageFactor :: Table Thread
                -> Table Block
+               -> Table Containment
                -> ThreadID
                -> Double
-blockageFactor thrTbl blkTbl (ThreadID thrId) = 
+blockageFactor thrTbl blkTbl cntTbl (ThreadID thrId) = 
   product $ map (\b -> 1 / (1 - b)) blockages
   where
-    blockages = map getBlockage $ 
-      selectWhere blkTbl $ \_ blk -> 
-        blockedThread blk == thrId
-    getBlockage blk = 
-      let blkThr = select thrTbl (blockingThread blk) 
-      in  if assignable blkThr
-            then blockingPercentage blk
-            else 100 -- TODO(anand) what should this actually be
+    blockages = map getBlockage (getBlockedThreads blkTbl thrId)
+    getBlockage (blkThrId, blkPerc) = 
+      let blkThr   = select thrTbl blkThrId 
+      in  if threadAssignable blkThr
+            then blkPerc
+            else case getChildren cntTbl blkThrId of
+              [] -> blkPerc
+              xs -> if all threadFinished (map (select thrTbl) xs) 
+                then 0
+                else blkPerc
 
 taskSample :: Table Thread
            -> Table Containment
            -> ThreadID 
            -> IO [ThreadID]
 taskSample thrTbl cntTbl thrId = 
-  probabilisticInclusion $ containmentDistribution thrTbl cntTbl thrId
+  sample $ 
+    inferMarginalInclusions thrTbl cntTbl thrId
 
-containmentDistribution :: Table Thread
-                        -> Table Containment
-                        -> ThreadID
-                        -> [(Double, ThreadID)]
-containmentDistribution = undefined -- TODO(anand) are the paths guaranteed to be unique
+containmentPdf :: Table Thread 
+               -> Table Containment 
+               -> ThreadID 
+               -> [(Double, ThreadID)]
+containmentPdf thrTbl cntTbl thrId = 
+  map (\c -> (containmentProbability c, childThread c)) $ 
+    selectWhere cntTbl $ \_ cnt -> 
+      parentThread cnt == thrId
 
-probabilisticInclusion :: [(Double, a)] -> IO [a]
-probabilisticInclusion pdf = catMaybes <$> mapM event pdf
+sample :: [(Double, a)] -> IO [a]
+sample pdf = catMaybes <$> mapM event pdf
   where
     event (p, a) = do
       outcome <- unfairCoin p
@@ -121,18 +155,67 @@ unfairCoin p = flip <$> getStdRandom (randomR (1,100))
   where
     flip r = r < (p * 100) 
 
--- Steps
+inferMarginalInclusion :: Table Thread
+                       -> Table Containment
+                       -> ThreadID -- Parent task
+                       -> ThreadID -- Descendant task
+                       -> Double   -- P(descendant task | parent task=T)
+inferMarginalInclusion thrTbl cntTbl parentId childId = 
+  case posterior junctionTree [varMap Map.! childId] of 
+    Just p  -> p
+    Nothing -> error "could not find cluster for given thread ID"
 
-data Assignment = Assignment {
-    assignedTask :: ThreadID
-  , assignedDev :: DevID
-  }
+  where
+    junctionTree = 
+      updateEvidence [(varMap Map.! parentId) =: True] $ 
+        createJunctionTree nodeComparisonForTriangulation net
 
-step1 :: Table Tag
-      -> Table Thread
-      -> Table Developer
-      -> Table Velocity
-      -> Table Containment
-      -> ThreadID
-      -> [Assignment]
-step1 tagTbl thrTbl devTbl velTbl cntTbl thrId = undefined -- blocked
+    (varMap, net) = runBN $ do
+      varMap <- createVars 
+      mapM_ (addFactor varMap . snd) (toList cntTbl)
+      return varMap
+
+    createVars = do
+      let thrIds = map fst (toList thrTbl)
+      let mkVar mp tid = do var <- variable tid (undefined :: Bool)
+                            return $ Map.insert tid var mp
+      foldlM mkVar Map.empty thrIds
+
+    addFactor varMap cnt = do
+      let parent = varMap Map.! (parentThread cnt) 
+      let child = varMap Map.! (childThread cnt)
+      let contP = containmentProbability cnt
+      cpt child [parent] ~~ [
+          1           -- p(child=F | parent=F)
+        , 1 - contP   -- p(child=F | parent=T)
+        , 0           -- p(child=T | parent=F)
+        , contP       -- p(child=T | parent=T)
+        ]
+
+taskPriority :: Table Thread
+             -> Table Block
+             -> Table Containment
+             -> ThreadID -- master thread ID
+             -> ThreadID -- given thread ID
+             -> Double
+taskPriority thrTbl blkTbl cntTbl masterThrId thrId = 
+  case getBlockedThreads blkTbl thrId of 
+    [] -> 
+      let p = inferMarginalInclusion thrTbl cntTbl masterThrId thrId
+          thr = select thrTbl thrId
+          story = threadStoryPts thr
+          blockage = blockageFactor thrTbl blkTbl cntTbl thrId 
+      in (-1) * log (1 - (15/16) * p) / (story * blockage)
+    xs -> sum $ for xs $ \(blkThrId, blkPerc) -> 
+      taskPriority thrTbl blkTbl cntTbl blkThrId * blkPerc
+
+schedule :: Table Thread
+         -> Table Block
+         -> Table Containment
+         -> Table Developer 
+         -> Table Tag 
+         -> Table Velocity 
+         -> [(ThreadID, DevID)]
+schedule thrTbl blkTbl cntTbl devTbl tagTbl velTbl = undefined
+  where
+    tasks = selectWhere thrTbl $ \_ thr -> threadAssignable thr
