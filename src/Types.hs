@@ -80,6 +80,8 @@ instance FromJSON Thread where
         Number n -> n == fromInteger 1
         _ -> error "boolean field is non-number"
 
+instance Debug Thread where 
+  debug = show . threadName
 
 data Containment = Containment {
     parentThread :: RecordID
@@ -120,7 +122,7 @@ instance FromJSON Velocity where
     mult <- v .: "Multiplier"
     return $ Velocity dev tag mult
 
-newtype DevName = DevName Text deriving (FromJSON)
+newtype DevName = DevName Text deriving (FromJSON, Show)
 
 data Developer = Developer {
     devName :: DevName
@@ -131,3 +133,67 @@ instance FromJSON Developer where
   parseJSON (Object v) = 
     Developer <$> v .: "Name"
               <*> v .: "Velocities"
+
+instance Debug Developer where
+  debug = show . devName
+
+type Schedule = HashMap DevID [(Double, Maybe ThreadID)]
+
+instance Debug (Table Developer, Schedule) where
+  debug (devTbl, s) = 
+       prettyRows 20 (map getRow $ Map.toList s)
+    ++ "\nTOTAL RUNTIME: " ++ getRuntime s
+    where
+      getRow (devId, timeline) = [
+        debug (select devTbl devId)
+      , "working time: " ++ getWorkingTime s devId
+      , "blocked time: " ++ getBlockedTime s devId 
+      ]
+
+getRuntime :: Schedule -> Double
+getRuntime = max . map (last . map fst) . Map.elems
+
+getWorkingTime :: Schedule -> DevID -> Double
+getWorkingTime mp devId = 
+  sum . map fst . filter (\(_,m) -> m == Nothing) . toDiffs $ mp Map.! devId
+
+getBlockedTime :: Schedule -> DevID -> Double
+getBlockedTime mp devId = 
+  sum . map fst . filter (\(_,m) -> isJust m) . toDiffs $ mp Map.! devId
+
+toDiffs :: Schedule -> Schedule 
+toDiffs = Map.map (foldr diff [])
+  where
+    toDiff t [] = t
+    toDiff (d, mode) ts = ts ++ [(d - fst (last ts), mode)]
+
+data ScheduleParams = ScheduleParams { 
+    w_unblocked :: Double
+  , w_elapsed :: Double
+  , w_priority :: Double
+  }
+
+instance Debug ScheduleParams where
+  debug prms = prettyRows 20 [
+      ["w_unblocked", show $ w_unblocked prms]
+    , ["w_elapsed", show $ w_elapsed prms]
+    , ["w_priority", show $ w_priority prms]
+    ]
+
+prettyRows :: Int -> [[String]] -> String  
+prettyRows maxLen = unlines . map (foldl' (\s t -> s ++ " | " ++ block t) "")
+  where
+    block s = take maxLen s ++ replicate (max (len s) maxLen - maxLen) ' ' 
+
+data Priority = Priority ThreadID Double
+
+instance Debug (Table Thread, [Priority]) where 
+  debug (thrTbl, priorities) = 
+    prettyRows 20 $ for priorities $ \(Priority t p) -> 
+      [debug (select t thrTbl), show p]
+
+-- Debug class
+
+class Debug a where
+  debug :: a -> String
+

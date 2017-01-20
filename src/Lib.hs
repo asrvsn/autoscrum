@@ -4,8 +4,11 @@
 module Lib where
 
 import Types
+import Constants
 
 import System.Random
+
+import Network.Wreq
 
 import Data.Monoid
 import qualified Data.HashMap.Strict as Map
@@ -14,15 +17,12 @@ import Bayes.BayesianNetwork
 
 -- API methods
 
-api_key :: ByteString
-api_key = "keyDSaC5Xv0BoKTSD"
-
-getTable :: (FromJSON (Table a)) => String -> IO (Table a)
+getTable :: (FromJSON a) => String -> IO (Table a)
 getTable tblStr = getTableParts opts url
   where
     opts = defaults & header "Authorization" .~ [api_key] 
                     & param "view" .~ ["Main View"]
-    url  = "https://api.airtable.com/v0/appfGT5ACymqznlOP/" <> tblStr
+    url  = api_url <> tblStr
 
 getTableParts :: Options -> String -> IO (Table a)
 getTableParts opts url = do
@@ -44,8 +44,14 @@ fromResp r = decode $ r ^. responseBody
 select :: Table a -> RecordID -> a
 select tbl rec = tableRecords tbl Map.! rec
 
+selectAll :: Table a -> [a]
+selectAll = map snd . toList
+
 selectWhere :: Table a -> (RecordID -> a -> Bool) -> [a]
-selectWhere tbl f = filter (uncurry f) (toList tbl)
+selectWhere tbl f = map snd $ filter (uncurry f) (toList tbl)
+
+selectKeyWhere :: Table a -> (RecordID -> a -> Bool) -> [RecordID]
+selectKeyWhere tbl f = map fst $ filter (uncurry f) (toList tbl)
 
 foreign :: (a -> RecordID) -> Table a -> Table b -> RecordID -> b
 foreign key tblA tblB rec = select tblB $ key (select tblA rec)
@@ -76,11 +82,25 @@ getParents cntTbl thrId =
 
 getBlockedThreads :: Table Block 
                   -> ThreadID
-                  -> [(ThreadID, Double)]
+                  -> [ThreadID]
 getBlockedThreads blkTbl thrId = 
-  map (\blk -> (blockedThread blk, blockPercentage blk)) $ 
+  map blockedThread blk $ 
     selectWhere blkTbl $ \_ blk -> 
       blockingThread blk == thrId
+
+getBlockingThreads :: Table Block 
+                    -> ThreadID
+                    -> [ThreadID]
+getBlockingThreads blkTbl thrId = 
+  map blockingThread blk $ 
+    selectWhere blkTbl $ \_ blk -> 
+      blockedThread blk == thrId
+
+getMasterThread :: Table Thread -> ThreadID
+getMasterThread thrTbl = thrId
+  where
+    [thrId] = selectKeyWhere thrTbl $ \_ thr -> 
+                threadName thr == master_thread_name
 
 -- Computation
 
@@ -131,16 +151,10 @@ taskSample :: Table Thread
            -> IO [ThreadID]
 taskSample thrTbl cntTbl thrId = 
   sample $ 
-    inferMarginalInclusions thrTbl cntTbl thrId
-
-containmentPdf :: Table Thread 
-               -> Table Containment 
-               -> ThreadID 
-               -> [(Double, ThreadID)]
-containmentPdf thrTbl cntTbl thrId = 
-  map (\c -> (containmentProbability c, childThread c)) $ 
-    selectWhere cntTbl $ \_ cnt -> 
-      parentThread cnt == thrId
+    map 
+      (\thr -> 
+        (thr, inferMarginalInclusion thrTbl cntTbl thr))
+      (getDescendants thrId)
 
 sample :: [(Double, a)] -> IO [a]
 sample pdf = catMaybes <$> mapM event pdf
@@ -200,22 +214,107 @@ taskPriority :: Table Thread
              -> Double
 taskPriority thrTbl blkTbl cntTbl masterThrId thrId = 
   case getBlockedThreads blkTbl thrId of 
+
     [] -> 
       let p = inferMarginalInclusion thrTbl cntTbl masterThrId thrId
           thr = select thrTbl thrId
           story = threadStoryPts thr
           blockage = blockageFactor thrTbl blkTbl cntTbl thrId 
+
       in (-1) * log (1 - (15/16) * p) / (story * blockage)
+
     xs -> sum $ for xs $ \(blkThrId, blkPerc) -> 
       taskPriority thrTbl blkTbl cntTbl blkThrId * blkPerc
 
-schedule :: Table Thread
+computePriorities :: Table Thread
+                 -> Table Block
+                 -> Table Containment
+                 -> IO [Priority]
+computePriorities thrTbl blkTbl cntTbl = 
+  forM tasks $ \task -> do
+    let priority = taskPriority thrTbl blkTbl cntTbl masterThrId task
+    putStrLn $ "Computed priority " ++ show priority ++ " for " ++ show task
+    return $ Priority task priority
+  where
+    tasks       = selectKeyWhere thrTbl $ \_ thr -> threadAssignable thr
+    masterThrId = getMasterThread thrTbl
+
+computeSchedule :: Table Thread
          -> Table Block
          -> Table Containment
          -> Table Developer 
          -> Table Tag 
          -> Table Velocity 
-         -> [(ThreadID, DevID)]
-schedule thrTbl blkTbl cntTbl devTbl tagTbl velTbl = undefined
+         -> ScheduleParams
+         -> IO Schedule
+computeSchedule thrTbl blkTbl cntTbl devTbl tagTbl velTbl prms = 
+  execStateT lptSchedule Map.empty
   where
-    tasks = selectWhere thrTbl $ \_ thr -> threadAssignable thr
+    devs  = selectAll devTbl
+    tasks = selectKeyWhere thrTbl $ \_ thr -> threadAssignable thr
+
+    masterThrId = getMasterThread thrTbl
+
+    lptSchedule :: StateT Schedule IO ()
+    lptSchedule = do
+      ts <- getUnblockedTasks
+      case ts of 
+        [] -> return ()
+        _  -> do
+          let possibleAssignments = [(t, d) | t <- ts, d <- devs]
+          rs <- mapM (uncurry assignmentRank) possibleAssignments
+          let (t, d), _) = minimumBy (compare `on` snd) (zip possibleAssignments rs)
+          assign t d
+          lptSchedule
+
+    getUnblockedTasks :: StateT Schedule IO [ThreadID]
+    getUnblockedTasks = do
+      completed <- gets $ Set.fromList . catMaybes . map snd . concat . Map.elems
+      return $ selectKeyWhere thrTbl $ \thr _ -> 
+        let blocks = Set.fromList (getBlockingThreads blkTbl thr) 
+        in blocks `Set.isSubsetOf` completed
+
+    -- the lower the rank, the better the assigment
+    assignmentRank :: ThreadID -> DevID -> StateT Schedule IO Double
+    assignmentRank thrId devId = do
+      -- (1) time to task unblocked (by dev availability as well as blocking threads)
+      t_task <- getTaskAvailability thrId
+      t_dev  <- getDevAvailability devId
+      let t_unblocked = max t_task t_dev
+      -- (2) dev completion time
+      let t_elapsed = taskCompletionTime tagTbl thrTbl devTbl velTbl thrId devId   
+      -- (3) task priority
+      let priority = taskPriority thrTbl blkTbl cntTbl masterThrId thrId
+      return $ 
+          w_unblocked * t_unblocked
+        + w_elapsed * t_elapsed
+        + w_priority * priority
+
+    assign :: ThreadID -> DevId -> StateT Schedule IO ()
+    assign thrId devId = do
+      let dt_task = taskCompletionTime tagTbl thrTbl devTbl velTbl thrId devId
+      t_task <- getTaskAvailability thrId
+      t_dev  <- getDevAvailability devId
+      let elapsed = if t_task > t_dev 
+                      then [(t_task, Nothing), (t_task + dt_task, Just thrId)]
+                      else [(t_dev + dt_task, Just thrId)]
+      modify $ 
+        Map.adjust (\ts -> ts ++ elapsed) devId
+      liftIO $ putStrLn $ "Assigned " ++ show thrId ++ " to " ++ show devId
+
+    getTaskAvailability :: ThreadID -> StateT Schedule IO Double
+    getTaskAvailability thrId = do
+      let blkThrs = getBlockingThreads blkTbl thrId
+      blkTimes <- mapM getCompletedTaskTime blkThrs
+      return $ maximum blkTimes
+
+    getDevAvailability :: DevID -> StateT Schedule IO Double
+    getDevAvailability devId = gets (\mp -> fst $ last (mp Map.! devId))
+
+    getCompletedTaskTime :: ThreadID -> StateT Schedule IO Double
+    getCompletedTaskTime thrId = gets $ \mp -> 
+      let rec [] = error $ "could not find completed task " ++ show thrId ++ "in schedule"
+          rec (timeline:rest) = case find (\(_, mode) -> Just thrId == mode) of 
+                                  Just (t_task, _) -> t_task
+                                  Nothing -> rec rest
+      in rec (Map.elems mp) 
