@@ -24,6 +24,12 @@ library
                      , aeson
                      , hbayes
                      , wreq
+                     , hashable
+                     , text
+                     , unordered-containers
+                     , bytestring
+                     , mtl
+                     , containers
   default-language:    Haskell2010
 
 executable airtable-exe

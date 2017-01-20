@@ -1,6 +1,9 @@
+{-# LANGUAGE OverloadedStrings #-}
+
 module Constants where
 
 import Types
+import Data.ByteString (ByteString)
 
 api_url :: String
 api_url = "https://api.airtable.com/v0/appfGT5ACymqznlOP/"
