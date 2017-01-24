@@ -3,6 +3,7 @@
 module Constants where
 
 import Types
+import Data.Text (Text)
 import Data.ByteString (ByteString)
 
 api_url :: String
@@ -11,7 +12,7 @@ api_url = "https://api.airtable.com/v0/appfGT5ACymqznlOP/"
 api_key :: ByteString
 api_key = "keyDSaC5Xv0BoKTSD"
 
-master_thread_name :: String
+master_thread_name :: Text
 master_thread_name = "Valuable at work"
 
 sched_params :: ScheduleParams

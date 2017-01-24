@@ -9,13 +9,12 @@ main = do
   putStrLn "===== ALPHASHEETS TASK SCHEDULER ====="
   putStrLn "..."
 
-  thrTbl <- getTable "Threads" :: Table Thread
-  blkTbl <- getTable "Blocks" :: Table Block
-  cntTbl <- getTable "Containments" :: Table Containment
-  devTbl <- getTable "Developers" :: Table Developersoper
-  tagTbl <- getTable "Task Types" :: Table Tag
-  velTbl <- getTable "Velocities" :: Table Velocity
-  putStrLn "Tables downloaded."
+  devTbl <- getTable "Developers" 
+  thrTbl <- getTable "Threads"
+  blkTbl <- getTable "Blocks" 
+  cntTbl <- getTable "Containments" 
+  tagTbl <- getTable "Task Types" 
+  velTbl <- getTable "Velocities" 
 
   putStrLn "Computing priorities..."
   priorities <- computePriorities thrTbl blkTbl cntTbl 

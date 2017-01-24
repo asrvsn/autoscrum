@@ -8,10 +8,12 @@ module Types where
 
 import           GHC.Generics
 
+import           Control.Applicative ((<|>))
 import qualified Data.HashMap.Strict as Map
 import           Data.Aeson
 import           Data.Aeson.Types
 import           Data.Text (Text)
+import qualified Data.Text as T
 import           Data.Monoid
 import           Data.Hashable
 import           Data.Traversable (for)
@@ -21,8 +23,20 @@ import           Data.Maybe (isJust)
 
 -- Core types
 
-newtype RecordID = RecordID Text deriving (FromJSON, Show, Eq, Generic)
+newtype RecordID = RecordID Text deriving (FromJSON, Show, Eq, Generic, Ord)
 instance Hashable RecordID 
+
+rec2str :: RecordID -> String
+rec2str (RecordID rec) = T.unpack rec
+
+class IsRecord a where
+  toRec :: a -> RecordID
+
+instance IsRecord RecordID where
+  toRec = id
+
+instance IsRecord String where
+  toRec = RecordID . T.pack 
 
 data Table a = Table {
     tableRecords :: Map.HashMap RecordID a
@@ -36,10 +50,11 @@ instance (FromJSON a) => FromJSON (Table a) where
     offset <- v .:? "offset"
     return $ Table parsedRecs offset
     where
-      parseRec tbl (Object v) = do
-        recId <- v .: "id"
-        obj <- v .: "fields" 
-        return $ Map.insert recId obj tbl
+      parseRec tbl (Object v) = 
+            do  recId <- v .: "id"
+                obj <- v .: "fields" 
+                return $ Map.insert recId obj tbl
+        <|> pure tbl
 
 instance Monoid (Table a) where
   mempty = Table mempty Nothing
@@ -48,8 +63,8 @@ instance Monoid (Table a) where
 toList :: Table a -> [(RecordID, a)]
 toList = Map.toList . tableRecords
 
-select :: Table a -> RecordID -> a
-select tbl rec = tableRecords tbl Map.! rec
+select :: (IsRecord r) => Table a -> r -> a
+select tbl rec = tableRecords tbl Map.! (toRec rec)
 
 selectAll :: Table a -> [a]
 selectAll = map snd . toList
@@ -65,10 +80,18 @@ selectKeyWhere tbl f = map fst $ filter (uncurry f) (toList tbl)
 
 -- ID types
 
-newtype ThreadID = ThreadID {getThreadId :: RecordID} deriving (Show, Eq)
+newtype ThreadID = ThreadID {getThreadId :: RecordID} deriving (Show, Eq, Ord)
+instance IsRecord ThreadID where
+  toRec (ThreadID rec) = rec
+
 newtype DevID = DevID {getDevId :: RecordID} deriving (Show, Eq, Generic)
 instance Hashable DevID
+instance IsRecord DevID where
+  toRec (DevID rec) = rec
+
 newtype TagID = TagID {getTagId :: RecordID} deriving (Show, Eq)
+instance IsRecord TagID where
+  toRec (TagID rec) = rec
 
 -- API types
 
@@ -90,14 +113,14 @@ data Thread = Thread {
   , threadStoryPts :: Double
   , threadAssignable :: Bool
   , threadFinished :: Bool
-  }
+  } deriving (Show)
 
 instance FromJSON Thread where 
   parseJSON (Object v) = 
     Thread <$> v .: "Thread name"
-           <*> v .: "Tags"
-           <*> v .: "Contained in"
-           <*> v .: "Blocks"
+           <*> v .:? "Tags" .!= []
+           <*> v .:? "Contained in" .!= []
+           <*> v .:? "Blocks" .!= []
            <*> v .:? "Story pts" .!= 42 -- what the hell should this default be 
            <*> (boolField <$> v .: "Assignable?")
            <*> (boolField <$> v .: "Done?")
@@ -157,7 +180,7 @@ data Developer = Developer {
 instance FromJSON Developer where
   parseJSON (Object v) = 
     Developer <$> v .: "Name"
-              <*> v .: "Velocities"
+              <*> v .:? "Velocities" .!= []
 
 instance Debug Developer where
   debug = show . devName
