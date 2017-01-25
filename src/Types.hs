@@ -9,6 +9,7 @@ module Types where
 import           GHC.Generics
 
 import           Control.Applicative ((<|>))
+import           Data.HashMap.Strict (HashMap)
 import qualified Data.HashMap.Strict as Map
 import           Data.Aeson
 import           Data.Aeson.Types
@@ -20,6 +21,16 @@ import           Data.Traversable (for)
 import           Data.Foldable (foldl', foldlM)
 import           Data.Maybe (isJust)
 
+import           Debug.Trace
+
+-- Core helpers
+
+trace' a b = trace (a <> show b) b
+
+lookup :: (Show k, Eq k, Hashable k, Show v) => HashMap k v -> k -> v
+lookup mp k = case Map.lookup k mp of 
+  Just v -> v
+  Nothing -> error $ "lookup failed in map: " <> show k <> "\nsource map: " <> show mp
 
 -- Core types
 
@@ -63,6 +74,9 @@ instance Monoid (Table a) where
 toList :: Table a -> [(RecordID, a)]
 toList = Map.toList . tableRecords
 
+exists :: (IsRecord r) => Table a -> r -> Bool
+exists tbl rec = Map.member (toRec rec) (tableRecords tbl)
+
 select :: (IsRecord r) => Table a -> r -> a
 select tbl rec = tableRecords tbl Map.! (toRec rec)
 
@@ -77,6 +91,9 @@ selectWhere tbl f = map snd $ filter (uncurry f) (toList tbl)
 
 selectKeyWhere :: Table a -> (RecordID -> a -> Bool) -> [RecordID]
 selectKeyWhere tbl f = map fst $ filter (uncurry f) (toList tbl)
+
+deleteWhere :: Table a -> (RecordID -> a -> Bool) -> Table a
+deleteWhere (Table recs off) f = Table (Map.filterWithKey (\k v -> not $ f k v) recs) off
 
 -- ID types
 
@@ -135,7 +152,7 @@ data Containment = Containment {
     parentThread :: RecordID
   , childThread :: RecordID
   , containmentProbability :: Double -- [0,1]
-  }
+  } deriving (Show)
 
 instance FromJSON Containment where
   parseJSON (Object v) = do

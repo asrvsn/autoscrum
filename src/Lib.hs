@@ -1,15 +1,19 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE NoImplicitPrelude #-}
 
 module Lib where
 
 import           Types
 import           Constants
 
+import           Prelude hiding (lookup)
+
 import           System.Random
 import           Network.Wreq
 import           Control.Lens ((^.), (.~), (&))
 import           Data.Monoid
+import           Data.Hashable
 import           Data.List (find, minimumBy)
 import           Data.Aeson (FromJSON, eitherDecode)
 import           Data.Maybe (catMaybes)
@@ -30,10 +34,7 @@ import           Bayes.FactorElimination ( nodeComparisonForTriangulation
                                          , changeEvidence
                                          , posterior
                                          )
-import           Debug.Trace
 
-
-trace' a b = trace (a <> show b) b
 
 -- API methods
 
@@ -133,6 +134,17 @@ getMasterThread thrTbl = ThreadID thrId
     [thrId] = selectKeyWhere thrTbl $ \_ thr -> 
                 threadName thr == master_thread_name
 
+-- Data cleaning
+
+reconcileThreads :: Table Containment 
+                  -> Table Block 
+                  -> Table Thread 
+                  -> Table Thread
+reconcileThreads cntTbl blkTbl thrTbl =
+  deleteWhere thrTbl $ \_ thr -> 
+       any (not . exists cntTbl) (threadContainments thr)
+    || any (not . exists blkTbl) (threadBlocks thr)
+
 -- Computation
 
 taskCompletionTime :: Table Tag
@@ -208,7 +220,7 @@ marginalInclusion thrTbl cntTbl childId =
   factorNorm marginalCPT
 
   where
-    marginalCPT = case posterior junctionTree [varMap Map.! (getThreadId childId)] of 
+    marginalCPT = case posterior junctionTree [varMap `lookup` (getThreadId childId)] of 
       Just p  -> p
       Nothing -> error $ "could not find cluster for given thread ID: " <> show childId
 
@@ -230,8 +242,8 @@ marginalInclusion thrTbl cntTbl childId =
       return $ Map.insert thrId var mp
 
     setContainment varMap cnt = do
-      let parent = varMap Map.! (parentThread cnt) 
-      let child = varMap Map.! (childThread cnt)
+      let parent = varMap `lookup` (parentThread cnt) 
+      let child = varMap `lookup` (childThread cnt)
       let contP = containmentProbability cnt
       cpt child [parent] ~~ [
           1           -- p(child=F | parent=F)
@@ -241,7 +253,7 @@ marginalInclusion thrTbl cntTbl childId =
         ]
 
     setRootContainment varMap thrId = 
-      proba (varMap Map.! thrId) ~~ [0, 1]
+      proba (varMap `lookup` thrId) ~~ [0, 1]
 
     varKeys = 
         Set.toList 
@@ -356,7 +368,7 @@ computeSchedule thrTbl blkTbl cntTbl devTbl tagTbl velTbl prms =
       return $ maximum blkTimes
 
     getDevAvailability :: DevID -> StateT Schedule IO Double
-    getDevAvailability devId = gets (\mp -> fst $ last (mp Map.! devId))
+    getDevAvailability devId = gets (\mp -> fst $ last (mp `lookup` devId))
 
     getCompletedTaskTime :: ThreadID -> StateT Schedule IO Double
     getCompletedTaskTime thrId = gets $ \mp -> 

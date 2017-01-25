@@ -10,11 +10,13 @@ main = do
   putStrLn "..."
 
   devTbl <- getTable "Developers" 
-  thrTbl <- getTable "Threads"
   blkTbl <- getTable "Blocks" 
   cntTbl <- getTable "Containments" 
   tagTbl <- getTable "Task Types" 
   velTbl <- getTable "Velocities" 
+  thrTbl <- reconcileThreads cntTbl blkTbl <$> getTable "Threads"
+
+  putStrLn . show $ select cntTbl "recoxpDxIXiu5YTmi"
 
   putStrLn "Computing priorities..."
   priorities <- computePriorities thrTbl blkTbl cntTbl 
