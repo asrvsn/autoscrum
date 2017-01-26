@@ -1,53 +1,88 @@
+{-# LANGUAGE LambdaCase #-}
+
 module Main where
 
 import Lib
 import Types
 import Constants
 
+import System.Exit (exitSuccess)
+
+opts :: [String]
+opts = [
+    "prioritize"
+  , "schedule"
+  , "train"
+  ]
+
 main :: IO ()
 main = do
   putStrLn "===== ALPHASHEETS TASK SCHEDULER ====="
-  putStrLn "..."
 
-  devTbl <- getTable "Developers" 
-  blkTbl <- getTable "Blocks" 
-  cntTbl <- getTable "Containments" 
-  tagTbl <- getTable "Task Types" 
-  velTbl <- getTable "Velocities" 
-  thrTbl <- reconcileThreads cntTbl blkTbl <$> getTable "Threads"
+  cmdOptions [
+      "prioritize"
+    , "schedule"
+    , "train"
+    , "download"
+    , "upload"
+    , "exit"
+    ] $ \case
 
-  putStrLn . show $ select cntTbl "recoxpDxIXiu5YTmi"
+      "prioritize" -> do
+        thrTbl <- getTable "Threads"
+        blkTbl <- getTable "Blocks" 
+        cntTbl <- getTable "Containments" 
 
-  putStrLn "Computing priorities..."
-  priorities <- computePriorities thrTbl blkTbl cntTbl 
-  putStrLn "...Done."
-  putStrLn "PRIORITIES:"
-  putStrLn $ debug (thrTbl, priorities)
+        let priorities = computePriorities thrTbl blkTbl cntTbl 
+        persist "priorities" priorities
+        putStrLn "...Done."
 
-  yn "Upload priorities?"
-     (mapM_ uploadPriority priorities >> putStrLn "...Uploaded.")
-     (putStrLn "Upload canceled.")
+      "schedule" -> do
+        thrTbl <- getTable "Threads"
+        blkTbl <- getTable "Blocks" 
+        cntTbl <- getTable "Containments" 
+        devTbl <- getTable "Developers" 
+        tagTbl <- getTable "Task Types" 
+        velTbl <- getTable "Velocities" 
 
-  putStrLn "Computing schedule using parameters:\n"
-  putStrLn $ debug sched_params
-  putStrLn "\n..."
-  schedule <- computeSchedule thrTbl blkTbl cntTbl devTbl tagTbl velTbl sched_params
-  putStrLn "...Done."
-  putStrLn $ debug (devTbl, schedule)
+        prms <- ynCached "sched_params" (return default_sched_params)
 
-  yn "Upload schedule?"
-      (uploadSchedule schedule >> putStrLn "...Uploaded.")
-      (putStrLn "Upload canceled.")
+        putStrLn "\nComputing schedule using parameters:\n"
+        putStrLn $ debug prms
+        putStrLn "...\n"
+        let schedule = computeSchedule thrTbl blkTbl cntTbl devTbl tagTbl velTbl prms
+        putStrLn $ debug (devTbl, schedule)
+        persist "schedule" schedule
+        putStrLn "\n...Done."
+        
+      "train" -> do
+        error "not implemented"
 
-  putStrLn "===== DONE ====="
+      "download" -> do
+        getTable "Threads" :: IO (Table Thread)
+        getTable "Blocks" :: IO (Table Block)
+        getTable "Containments" :: IO (Table Containment)
+        getTable "Developers" :: IO (Table Developer)
+        getTable "Task Types" :: IO (Table Tag)
+        getTable "Velocities" :: IO (Table Velocity)
+        return ()
 
-yn :: String -> IO () -> IO () -> IO ()
-yn ask y n = do
-  putStrLn $ ask ++ " (Y/N)"
-  resp <- getLine
-  case resp of 
-    "y" -> y
-    "Y" -> y
-    "n" -> n
-    "N" -> n
-    _   -> yn ask y n
+      "upload" -> do
+        cmdOptions [
+            "schedule"
+          , "priorities"
+          ] $ \case 
+            "schedule" -> do
+              schedule <- retrieve "schedule" :: IO Schedule
+              uploadSchedule schedule 
+              putStrLn "done."
+            "priorities" -> do
+              priorities <- retrieve "priorities" :: IO [Priority]
+              mapM_ uploadPriority priorities 
+              putStrLn "done."
+
+      "exit" -> do
+        putStrLn "===== EXITED ====="
+        exitSuccess
+
+

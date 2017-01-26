@@ -10,12 +10,13 @@ import           Constants
 import           Prelude hiding (lookup)
 
 import           System.Random
+import           System.Directory (doesFileExist)
 import           Network.Wreq
 import           Control.Lens ((^.), (.~), (&))
 import           Data.Monoid
 import           Data.Hashable
 import           Data.List (find, minimumBy)
-import           Data.Aeson (FromJSON, eitherDecode)
+import           Data.Aeson (FromJSON, ToJSON, eitherDecode)
 import           Data.Maybe (catMaybes)
 import           Data.Foldable (foldlM)
 import           Data.Function (on)
@@ -33,13 +34,58 @@ import           Bayes.FactorElimination ( nodeComparisonForTriangulation
                                          , createJunctionTree
                                          , changeEvidence
                                          , posterior
+                                         , JunctionTree
                                          )
 
 
+-- General methods
+
+yn :: String -> IO a -> IO a -> IO a
+yn ask y n = do
+  putStrLn $ "\n" ++ ask ++ " (Y/N)"
+  resp <- getLine
+  case resp of 
+    "y" -> y
+    "Y" -> y
+    "n" -> n
+    "N" -> n
+    _   -> yn ask y n
+
+ynCached :: (Read a) => String -> IO a -> IO a
+ynCached fname n = do
+  b <- doesFileExist (fname <> ".cache")
+  if b 
+    then yn ("Use cached " <> fname <> "?") (retrieve fname) n
+    else n
+
+cmdOptions :: [String] -> (String -> IO ()) -> IO ()
+cmdOptions opts f = do
+  putStrLn "The following actions are available:"
+  putStrLn $ "\n" <> unlines opts
+  putStrLn "\nWhat would you like to do?"
+  resp <- getLine
+  case find (== resp) opts of 
+    Just _ -> do
+      f resp 
+      cmdOptions opts f
+    Nothing -> do
+      putStrLn "That's not an available action."
+      cmdOptions opts f
+
 -- API methods
 
-getTable :: (FromJSON a) => String -> IO (Table a)
-getTable tblStr = getTableParts opts url <* putStrLn ("Downloaded " <> tblStr)
+persist :: (Show a) => String -> a -> IO ()
+persist fname a = writeFile (fname <> ".cache") (show a)
+
+retrieve :: (Read a) => String -> IO a
+retrieve fname = read <$> readFile (fname <> ".cache")
+
+getTable :: (FromJSON a, Show a, Read a) => String -> IO (Table a)
+getTable tblStr = ynCached (tblStr <> "_table") $ do
+  tbl <- getTableParts opts url 
+  persist (tblStr <> "_table") tbl
+  putStrLn $ "Downloaded " <> tblStr
+  return tbl
   where
     opts = defaults & header "Authorization" .~ ["Bearer " <> api_key] 
                     & param "view" .~ ["Main View"]
@@ -105,28 +151,34 @@ getDescendants cntTbl thrId =
     rec a cs = rec (foldr Set.insert a cs) (foldMap (getChildren cntTbl) cs)
 
 getBlockages :: Table Block 
+              -> Table Thread
              -> ThreadID 
              -> [(ThreadID, Double)]
-getBlockages blkTbl thrId = 
+getBlockages blkTbl thrTbl thrId = 
   map (\b -> (ThreadID $ blockedThread b, blockPercentage b)) $ 
     selectWhere blkTbl $ \_ blk -> 
-      blockingThread blk == getThreadId thrId
+         blockingThread blk == getThreadId thrId
+      && not (threadFinished $ select thrTbl thrId)
 
 getBlockedThreads :: Table Block 
+                  -> Table Thread
                   -> ThreadID
                   -> [ThreadID]
-getBlockedThreads blkTbl thrId = 
+getBlockedThreads blkTbl thrTbl thrId = 
   map (ThreadID . blockedThread) $ 
     selectWhere blkTbl $ \_ blk -> 
-      blockingThread blk == getThreadId thrId
+         blockingThread blk == getThreadId thrId
+      && not (threadFinished $ select thrTbl thrId)
 
 getBlockingThreads :: Table Block 
+                    -> Table Thread
                     -> ThreadID
                     -> [ThreadID]
-getBlockingThreads blkTbl thrId = 
+getBlockingThreads blkTbl thrTbl thrId = 
   map (ThreadID . blockingThread) $ 
     selectWhere blkTbl $ \_ blk -> 
-      blockedThread blk == getThreadId thrId
+         blockedThread blk == getThreadId thrId
+      && not (threadFinished $ select thrTbl thrId)
 
 getMasterThread :: Table Thread -> ThreadID
 getMasterThread thrTbl = ThreadID thrId
@@ -136,14 +188,20 @@ getMasterThread thrTbl = ThreadID thrId
 
 -- Data cleaning
 
-reconcileThreads :: Table Containment 
-                  -> Table Block 
+reconcileTables :: Table Block
+                  -> Table Containment 
                   -> Table Thread 
-                  -> Table Thread
-reconcileThreads cntTbl blkTbl thrTbl =
-  deleteWhere thrTbl $ \_ thr -> 
-       any (not . exists cntTbl) (threadContainments thr)
-    || any (not . exists blkTbl) (threadBlocks thr)
+                  -> (Table Block, Table Containment, Table Thread)
+reconcileTables blkTbl_ cntTbl_ thrTbl_ =
+  (blkTbl, cntTbl, thrTbl)
+  where
+    blkTbl =  deleteWhere blkTbl_ $ \_ blk -> 
+                any (not . exists thrTbl_) [blockingThread blk, blockedThread blk]
+    cntTbl =  deleteWhere cntTbl_ $ \_ cnt -> 
+                any (not . exists thrTbl_) [parentThread cnt, childThread cnt] 
+    thrTbl =  deleteWhere thrTbl_ $ \_ thr -> 
+                any (not . exists cntTbl_) (threadContainments thr ++ threadBlocks thr)
+
 
 -- Computation
 
@@ -155,7 +213,7 @@ taskCompletionTime :: Table Tag
                    -> DevID 
                    -> Double
 taskCompletionTime tagTbl thrTbl devTbl velTbl (ThreadID thrId) (DevID devId) = 
-  storyPts / product devMultipliers * product missingMultipliers
+  storyPts / (product devMultipliers * product missingMultipliers)
   where
     dev = select devTbl devId
     thr = select thrTbl thrId
@@ -177,7 +235,7 @@ blockageFactor :: Table Thread
 blockageFactor thrTbl blkTbl cntTbl thrId = 
   product $ map (\b -> 1 / (1 - b)) blockages
   where
-    blockages = map compute (getBlockages blkTbl thrId)
+    blockages = map compute (getBlockages blkTbl thrTbl thrId)
     compute (blkThrId, blkPerc) = 
       let blkThr   = select thrTbl blkThrId 
       in  if threadAssignable blkThr
@@ -188,16 +246,16 @@ blockageFactor thrTbl blkTbl cntTbl thrId =
                 then 0
                 else blkPerc
 
-taskSample :: Table Thread
-           -> Table Containment
-           -> ThreadID -- parent thread
-           -> IO [ThreadID]
-taskSample thrTbl cntTbl parentThrId = 
-  sample $ 
-    map 
-      (\childThrId -> 
-        (marginalInclusion thrTbl cntTbl childThrId, childThrId))
-      (getDescendants cntTbl parentThrId)
+-- taskSample :: Table Thread
+--            -> Table Containment
+--            -> ThreadID -- parent thread
+--            -> IO [ThreadID]
+-- taskSample thrTbl cntTbl parentThrId = 
+--   sample $ 
+--     map 
+--       (\childThrId -> 
+--         (marginalInclusion thrTbl cntTbl childThrId, childThrId))
+--       (getDescendants cntTbl parentThrId)
 
 sample :: [(Double, a)] -> IO [a]
 sample pdf = catMaybes <$> mapM event pdf
@@ -212,18 +270,11 @@ unfairCoin p = flip <$> getStdRandom (randomR (1,100))
   where
     flip r = r < (p * 100) 
 
-marginalInclusion :: Table Thread
-                 -> Table Containment
-                 -> ThreadID -- Descendant task
-                 -> Double   -- P(descendant task | parent task=T)
-marginalInclusion thrTbl cntTbl childId = 
-  factorNorm marginalCPT
-
+bayesNet :: Table Thread 
+         -> Table Containment 
+         -> (HashMap RecordID (TDV Bool), JunctionTree CPT)
+bayesNet thrTbl cntTbl = (varMap, junctionTree)
   where
-    marginalCPT = case posterior junctionTree [varMap `lookup` (getThreadId childId)] of 
-      Just p  -> p
-      Nothing -> error $ "could not find cluster for given thread ID: " <> show childId
-
     junctionTree = createJunctionTree nodeComparisonForTriangulation net
 
     (varMap, net) = construction
@@ -233,8 +284,9 @@ marginalInclusion thrTbl cntTbl childId =
       varMap <- foldlM createVar Map.empty varKeys
       mapM_ (setContainment varMap) (selectAll cntTbl)
       -- initialize all root threads
-      let rootKeys = filter (null . getParents cntTbl . ThreadID) varKeys
-      mapM_ (setRootContainment varMap) rootKeys
+      mapM_ (setCertainContainment varMap) rootKeys
+      -- initialize all dis connected threads (this is for inconsistent data)
+      mapM_ (setCertainContainment varMap) (varKeys `Set.difference` cntKeys)
       return varMap
 
     createVar mp thrId = do
@@ -252,27 +304,41 @@ marginalInclusion thrTbl cntTbl childId =
         , contP       -- p(child=T | parent=T)
         ]
 
-    setRootContainment varMap thrId = 
+    setCertainContainment varMap thrId = 
       proba (varMap `lookup` thrId) ~~ [0, 1]
 
-    varKeys = 
-        Set.toList 
-      . Set.fromList 
+    varKeys = Set.fromList (selectAllKeys thrTbl)
+    rootKeys = Set.filter (null . getParents cntTbl . ThreadID) varKeys
+    cntKeys = 
+        Set.fromList 
       . foldMap (\cnt -> [parentThread cnt, childThread cnt])
       $ selectAll cntTbl 
 
+
     masterThrId = getMasterThread thrTbl
+
+marginalInclusion :: HashMap RecordID (TDV Bool) 
+                  -> JunctionTree CPT
+                  -> ThreadID
+                  -> Double
+marginalInclusion varMap juncTree childId = 
+  factorNorm $ 
+    case posterior juncTree [varMap `lookup` (getThreadId childId)] of 
+      Just p  -> p
+      Nothing -> error $ "could not find cluster for given thread ID: " <> show childId
 
 taskPriority :: Table Thread
              -> Table Block
              -> Table Containment
+             -> HashMap RecordID (TDV Bool)
+             -> JunctionTree CPT
              -> ThreadID -- given thread ID
              -> Double
-taskPriority thrTbl blkTbl cntTbl thrId = 
-  case getBlockages blkTbl thrId of 
+taskPriority thrTbl blkTbl cntTbl varMap juncTree thrId = 
+  case getBlockages blkTbl thrTbl thrId of 
 
     [] -> 
-      let p = marginalInclusion thrTbl cntTbl thrId
+      let p = marginalInclusion varMap juncTree thrId
           thr = select thrTbl thrId
           story = threadStoryPts thr
           blockage = blockageFactor thrTbl blkTbl cntTbl thrId 
@@ -281,21 +347,20 @@ taskPriority thrTbl blkTbl cntTbl thrId =
 
     xs -> 
       let blockagePriority blkThrId blkPerc = 
-            taskPriority thrTbl blkTbl cntTbl blkThrId * blkPerc
+            taskPriority thrTbl blkTbl cntTbl varMap juncTree blkThrId * blkPerc
 
       in sum $ map (uncurry blockagePriority) xs
 
 computePriorities :: Table Thread
                  -> Table Block
                  -> Table Containment
-                 -> IO [Priority]
+                 -> [Priority]
 computePriorities thrTbl blkTbl cntTbl = 
-  forM tasks $ \task -> do
-    let priority = taskPriority thrTbl blkTbl cntTbl task
-    putStrLn $ "Computed priority " ++ show priority ++ " for " ++ debug (select thrTbl task)
-    return $ Priority task priority
+  map getPriority tasks
   where
     tasks       = map ThreadID $ selectKeyWhere thrTbl $ \_ thr -> threadAssignable thr
+    (varMap, juncTree) = bayesNet thrTbl cntTbl
+    getPriority t = Priority t (taskPriority thrTbl blkTbl cntTbl varMap juncTree t)
 
 computeSchedule :: Table Thread
          -> Table Block
@@ -304,16 +369,18 @@ computeSchedule :: Table Thread
          -> Table Tag 
          -> Table Velocity 
          -> ScheduleParams
-         -> IO Schedule
+         -> Schedule
 computeSchedule thrTbl blkTbl cntTbl devTbl tagTbl velTbl prms = 
-  execStateT lptSchedule Map.empty
+  execState lptSchedule initSchedule
   where
     devs  = selectAllKeys devTbl
     tasks = selectKeyWhere thrTbl $ \_ thr -> threadAssignable thr
 
+    initSchedule = Map.fromList $ zip (map DevID devs) (repeat [])
+
     masterThrId = getMasterThread thrTbl
 
-    lptSchedule :: StateT Schedule IO ()
+    lptSchedule :: State Schedule ()
     lptSchedule = do
       ts <- getUnblockedTasks
       case ts of 
@@ -325,16 +392,18 @@ computeSchedule thrTbl blkTbl cntTbl devTbl tagTbl velTbl prms =
           assign t d
           lptSchedule
 
-    getUnblockedTasks :: StateT Schedule IO [ThreadID]
+    getUnblockedTasks :: State Schedule [ThreadID]
     getUnblockedTasks = do
       completed <- gets $ Set.fromList . catMaybes . map snd . concat . Map.elems
       return $ map ThreadID $ 
-        selectKeyWhere thrTbl $ \thr _ -> 
-          let blocks = Set.fromList (getBlockingThreads blkTbl $ ThreadID thr) 
-          in blocks `Set.isSubsetOf` completed
+        selectKeyWhere thrTbl $ \thrId thr -> 
+          let blocks = Set.fromList (getBlockingThreads blkTbl thrTbl $ ThreadID thrId) 
+          in    blocks `Set.isSubsetOf` completed
+             && ThreadID thrId `Set.notMember` completed
+             && not (threadFinished thr)
 
     -- the lower the rank, the better the assigment
-    assignmentRank :: ThreadID -> DevID -> StateT Schedule IO Double
+    assignmentRank :: ThreadID -> DevID -> State Schedule Double
     assignmentRank thrId devId = do
       -- (1) time to task unblocked (by dev availability as well as blocking threads)
       t_task <- getTaskAvailability thrId
@@ -343,13 +412,13 @@ computeSchedule thrTbl blkTbl cntTbl devTbl tagTbl velTbl prms =
       -- (2) dev completion time
       let t_elapsed = taskCompletionTime tagTbl thrTbl devTbl velTbl thrId devId   
       -- (3) task priority
-      let priority = taskPriority thrTbl blkTbl cntTbl thrId
+      let priority = taskPriority thrTbl blkTbl cntTbl varMap juncTree thrId
       return $ 
           w_unblocked prms * t_unblocked
         + w_elapsed prms * t_elapsed
         + w_priority prms * priority
 
-    assign :: ThreadID -> DevID -> StateT Schedule IO ()
+    assign :: ThreadID -> DevID -> State Schedule ()
     assign thrId devId = do
       let dt_task = taskCompletionTime tagTbl thrTbl devTbl velTbl thrId devId
       t_task <- getTaskAvailability thrId
@@ -358,22 +427,37 @@ computeSchedule thrTbl blkTbl cntTbl devTbl tagTbl velTbl prms =
                       then [(t_task, Nothing), (t_task + dt_task, Just thrId)]
                       else [(t_dev + dt_task, Just thrId)]
       modify $ 
-        Map.adjust (\ts -> ts ++ elapsed) devId
-      liftIO $ putStrLn $ "Assigned " ++ show thrId ++ " to " ++ show devId
+        Map.adjust (\ts -> elapsed ++ ts) devId
+      -- liftIO $ putStrLn $ 
+      --      "Assigned " 
+      --   ++ debug (select thrTbl thrId) 
+      --   ++ " to " 
+      --   ++ debug (select devTbl devId)
+      --   ++ " at time " 
+      --   ++ show (max t_task t_dev)
+      --   ++ " taking "
+      --   ++ show dt_task
 
-    getTaskAvailability :: ThreadID -> StateT Schedule IO Double
+    getTaskAvailability :: ThreadID -> State Schedule Double
     getTaskAvailability thrId = do
-      let blkThrs = getBlockingThreads blkTbl thrId
+      let blkThrs = getBlockingThreads blkTbl thrTbl thrId
       blkTimes <- mapM getCompletedTaskTime blkThrs
-      return $ maximum blkTimes
+      return $ case blkTimes of 
+        [] -> 0
+        _  -> maximum blkTimes
 
-    getDevAvailability :: DevID -> StateT Schedule IO Double
-    getDevAvailability devId = gets (\mp -> fst $ last (mp `lookup` devId))
+    getDevAvailability :: DevID -> State Schedule Double
+    getDevAvailability devId = gets $ \mp -> 
+      case mp `lookup` devId of
+        []   -> 0
+        t:ts -> fst t 
 
-    getCompletedTaskTime :: ThreadID -> StateT Schedule IO Double
+    getCompletedTaskTime :: ThreadID -> State Schedule Double
     getCompletedTaskTime thrId = gets $ \mp -> 
       let rec [] = error $ "could not find completed task " ++ show thrId ++ "in schedule"
           rec (timeline:rest) = case find (\(_, mode) -> Just thrId == mode) timeline of 
                                   Just (t_task, _) -> t_task
                                   Nothing -> rec rest
       in rec (Map.elems mp) 
+
+    (varMap, juncTree) = bayesNet thrTbl cntTbl

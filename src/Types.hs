@@ -3,8 +3,11 @@
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE DeriveGeneric #-}
+{-# LANGUAGE NoImplicitPrelude #-}
 
 module Types where
+
+import           Prelude hiding (lookup)
 
 import           GHC.Generics
 
@@ -34,7 +37,7 @@ lookup mp k = case Map.lookup k mp of
 
 -- Core types
 
-newtype RecordID = RecordID Text deriving (FromJSON, Show, Eq, Generic, Ord)
+newtype RecordID = RecordID Text deriving (FromJSON, Show, Read, Eq, Generic, Ord)
 instance Hashable RecordID 
 
 rec2str :: RecordID -> String
@@ -52,7 +55,7 @@ instance IsRecord String where
 data Table a = Table {
     tableRecords :: Map.HashMap RecordID a
   , tableOffset :: Maybe Text
-  } deriving (Show)
+  } deriving (Show, Read)
 
 instance (FromJSON a) => FromJSON (Table a) where
   parseJSON (Object v) = do
@@ -65,7 +68,7 @@ instance (FromJSON a) => FromJSON (Table a) where
             do  recId <- v .: "id"
                 obj <- v .: "fields" 
                 return $ Map.insert recId obj tbl
-        <|> pure tbl
+        <|> error ("could not decode: " <> show v)
 
 instance Monoid (Table a) where
   mempty = Table mempty Nothing
@@ -77,8 +80,8 @@ toList = Map.toList . tableRecords
 exists :: (IsRecord r) => Table a -> r -> Bool
 exists tbl rec = Map.member (toRec rec) (tableRecords tbl)
 
-select :: (IsRecord r) => Table a -> r -> a
-select tbl rec = tableRecords tbl Map.! (toRec rec)
+select :: (IsRecord r, Show a) => Table a -> r -> a
+select tbl rec = tableRecords tbl `lookup` (toRec rec)
 
 selectAll :: Table a -> [a]
 selectAll = map snd . toList
@@ -97,16 +100,16 @@ deleteWhere (Table recs off) f = Table (Map.filterWithKey (\k v -> not $ f k v) 
 
 -- ID types
 
-newtype ThreadID = ThreadID {getThreadId :: RecordID} deriving (Show, Eq, Ord)
+newtype ThreadID = ThreadID {getThreadId :: RecordID} deriving (Show, Read, Eq, Ord)
 instance IsRecord ThreadID where
   toRec (ThreadID rec) = rec
 
-newtype DevID = DevID {getDevId :: RecordID} deriving (Show, Eq, Generic)
+newtype DevID = DevID {getDevId :: RecordID} deriving (Show, Read, Eq, Generic)
 instance Hashable DevID
 instance IsRecord DevID where
   toRec (DevID rec) = rec
 
-newtype TagID = TagID {getTagId :: RecordID} deriving (Show, Eq)
+newtype TagID = TagID {getTagId :: RecordID} deriving (Show, Read, Eq)
 instance IsRecord TagID where
   toRec (TagID rec) = rec
 
@@ -115,7 +118,7 @@ instance IsRecord TagID where
 data Tag = Tag {
     tagName :: Text
   , tagMultiplierIfMissing :: Double
-  }
+  } deriving (Show, Read)
 
 instance FromJSON Tag where
   parseJSON (Object v) = 
@@ -130,7 +133,7 @@ data Thread = Thread {
   , threadStoryPts :: Double
   , threadAssignable :: Bool
   , threadFinished :: Bool
-  } deriving (Show)
+  } deriving (Show, Read)
 
 instance FromJSON Thread where 
   parseJSON (Object v) = 
@@ -152,7 +155,7 @@ data Containment = Containment {
     parentThread :: RecordID
   , childThread :: RecordID
   , containmentProbability :: Double -- [0,1]
-  } deriving (Show)
+  } deriving (Show, Read)
 
 instance FromJSON Containment where
   parseJSON (Object v) = do
@@ -165,7 +168,7 @@ data Block = Block {
     blockingThread :: RecordID
   , blockedThread :: RecordID
   , blockPercentage :: Double -- [0,1]
-  }
+  } deriving (Show, Read)
 
 instance FromJSON Block where
   parseJSON (Object v) = do
@@ -178,7 +181,7 @@ data Velocity = Velocity {
     vDeveloper :: RecordID
   , vTag :: RecordID
   , vMultiplier :: Double -- [0,1]
-  }
+  } deriving (Show, Read)
 
 instance FromJSON Velocity where
   parseJSON (Object v) = do
@@ -187,12 +190,12 @@ instance FromJSON Velocity where
     mult <- v .: "Multiplier"
     return $ Velocity dev tag mult
 
-newtype DevName = DevName Text deriving (FromJSON, Show)
+newtype DevName = DevName Text deriving (FromJSON, Show, Read)
 
 data Developer = Developer {
     devName :: DevName
   , devVelocities :: [RecordID]
-  }
+  } deriving (Show, Read)
 
 instance FromJSON Developer where
   parseJSON (Object v) = 
@@ -211,32 +214,34 @@ instance Debug (Table Developer, Schedule) where
     where
       getRow (devId, timeline) = [
           debug (select devTbl (getDevId devId))
-        , "working time: " ++ show (getWorkingTime s devId)
-        , "blocked time: " ++ show (getBlockedTime s devId) 
+        , "working: " ++ show (getWorkingTime s devId)
+        , "blocked: " ++ show (getBlockedTime s devId) 
         ]
 
 getRuntime :: Schedule -> Double
-getRuntime = maximum . map (last . map fst) . Map.elems
+getRuntime = maximum . map (head . map fst) . Map.elems
 
 getWorkingTime :: Schedule -> DevID -> Double
 getWorkingTime mp devId = 
-  sum . map fst . filter (\(_,m) -> m == Nothing) $ (toDiffs mp) Map.! devId
+  sum . map fst . filter (\(_,m) -> isJust m) $ (toDiffs mp) `lookup` devId
 
 getBlockedTime :: Schedule -> DevID -> Double
 getBlockedTime mp devId = 
-  sum . map fst . filter (\(_,m) -> isJust m) $ (toDiffs mp) Map.! devId
+  sum . map fst . filter (\(_,m) -> m == Nothing) $ (toDiffs mp) `lookup` devId
 
 toDiffs :: Schedule -> Schedule 
-toDiffs = Map.map (foldr toDiff [])
+toDiffs = Map.map (rec [])
   where
-    toDiff t [] = [t]
-    toDiff (d, mode) ts = ts ++ [(d - fst (last ts), mode)]
+    rec a [] = reverse a
+    rec a ((t1, mode1):[]) = (t1, mode1):a
+    rec a ((t2, mode2):(t1, mode1):rest) = 
+      rec ((t2 - t1, mode2):a) ((t1, mode1):rest)
 
 data ScheduleParams = ScheduleParams { 
     w_unblocked :: Double
   , w_elapsed :: Double
   , w_priority :: Double
-  }
+  } deriving (Read, Show)
 
 instance Debug ScheduleParams where
   debug prms = prettyRows 20 [
@@ -246,11 +251,11 @@ instance Debug ScheduleParams where
     ]
 
 prettyRows :: Int -> [[String]] -> String  
-prettyRows maxLen = unlines . map (foldl' (\s t -> s ++ " | " ++ block t) "")
+prettyRows maxLen = unlines . map (concat . map (\s -> " | " ++ block s))
   where
-    block s = take maxLen s ++ replicate (max (length s) maxLen - maxLen) ' ' 
+    block s = take maxLen s ++ replicate (max (length s) maxLen - length s) ' ' 
 
-data Priority = Priority ThreadID Double
+data Priority = Priority ThreadID Double deriving (Show, Read)
 
 instance Debug (Table Thread, [Priority]) where 
   debug (thrTbl, priorities) = 

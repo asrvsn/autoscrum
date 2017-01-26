@@ -15,8 +15,8 @@ api_key = "keyDSaC5Xv0BoKTSD"
 master_thread_name :: Text
 master_thread_name = "Valuable at work"
 
-sched_params :: ScheduleParams
-sched_params = ScheduleParams {
+default_sched_params :: ScheduleParams
+default_sched_params = ScheduleParams {
     w_unblocked = 1.0
   , w_elapsed   = 1.0
   , w_priority  = 1.0
