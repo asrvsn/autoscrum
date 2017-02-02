@@ -25,6 +25,7 @@ main = do
     , "train"
     , "download"
     , "upload"
+    , "visualize"
     , "exit"
     ] $ \case
 
@@ -55,6 +56,10 @@ main = do
         persist "schedule" schedule
         putStrLn "\n...Done."
         
+        persist "schedule_vis" (schedule2vis schedule)
+
+        yn "see visualization?" visualizeSchedule (pure ())
+
       "train" -> do
         error "not implemented"
 
@@ -80,6 +85,8 @@ main = do
               priorities <- retrieve "priorities" :: IO [Priority]
               mapM_ uploadPriority priorities 
               putStrLn "done."
+
+      "visualize" -> visualizeSchedule
 
       "exit" -> do
         putStrLn "===== EXITED ====="

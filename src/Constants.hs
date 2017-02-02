@@ -21,3 +21,9 @@ default_sched_params = ScheduleParams {
   , w_elapsed   = 1.0
   , w_priority  = 1.0
   }
+
+cache_ext :: String
+cache_ext = ".cache"
+
+url_ext :: String
+url_ext = ".url"

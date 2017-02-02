@@ -23,6 +23,7 @@ import           Data.Hashable
 import           Data.Traversable (for)
 import           Data.Foldable (foldl', foldlM)
 import           Data.Maybe (isJust)
+import qualified Data.ByteString.Lazy.Char8 as BLC
 
 import           Debug.Trace
 
@@ -236,6 +237,16 @@ toDiffs = Map.map (rec [])
     rec a ((t1, mode1):[]) = (t1, mode1):a
     rec a ((t2, mode2):(t1, mode1):rest) = 
       rec ((t2 - t1, mode2):a) ((t1, mode1):rest)
+
+data ScheduleVis = ScheduleVis { 
+    getVis :: Map.HashMap DevID [(Double, Maybe ThreadID)] 
+  } deriving (Generic, ScheduleVis)
+
+schedule2vis :: Schedule -> ScheduleVis
+schedule2vis = ScheduleVis
+
+instance Show ScheduleVis where
+  show = BLC.unpack . encode 
 
 data ScheduleParams = ScheduleParams { 
     w_unblocked :: Double
