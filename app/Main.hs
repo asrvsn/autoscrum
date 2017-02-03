@@ -56,7 +56,7 @@ main = do
         persist "schedule" schedule
         putStrLn "\n...Done."
         
-        persist "schedule_vis" (schedule2vis schedule)
+        persist "schedule_vis" (schedule2vis thrTbl devTbl schedule)
 
         yn "see visualization?" visualizeSchedule (pure ())
 

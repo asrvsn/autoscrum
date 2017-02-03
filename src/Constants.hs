@@ -12,8 +12,8 @@ api_url = "https://api.airtable.com/v0/appfGT5ACymqznlOP/"
 api_key :: ByteString
 api_key = "keyDSaC5Xv0BoKTSD"
 
-master_thread_name :: Text
-master_thread_name = "Valuable at work"
+master_thread_name :: ThreadName
+master_thread_name = ThreadName "Valuable at work"
 
 default_sched_params :: ScheduleParams
 default_sched_params = ScheduleParams {

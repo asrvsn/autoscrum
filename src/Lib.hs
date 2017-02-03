@@ -11,7 +11,7 @@ import           Prelude hiding (lookup)
 
 import           System.Random
 import           System.Directory (doesFileExist)
-import           Shelly (run_)
+import           System.Process (system)
 import           Network.Wreq
 import           Control.Lens ((^.), (.~), (&))
 import           Data.Monoid
@@ -83,9 +83,10 @@ retrieve fname = read <$> readFile (fname <> ".cache")
 
 visualizeSchedule :: IO () 
 visualizeSchedule = do
-  run_ "." ["python visualize.py"]
+  system "python visualize.py"
   url <- readFile "schedule_vis.url"
-  run_ "google-chrome schedule_vis.url"
+  system "google-chrome schedule_vis.url"
+  return ()
 
 getTable :: (FromJSON a, Show a, Read a) => String -> IO (Table a)
 getTable tblStr = ynCached (tblStr <> "_table") $ do

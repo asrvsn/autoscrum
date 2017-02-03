@@ -126,8 +126,10 @@ instance FromJSON Tag where
     Tag <$> v .: "Name" 
         <*> v .: "Multiplier if missing"
 
+newtype ThreadName = ThreadName Text deriving (FromJSON, ToJSON, Show, Read, Eq)
+
 data Thread = Thread {
-    threadName :: Text
+    threadName :: ThreadName
   , threadTags :: [RecordID]
   , threadContainments :: [RecordID]
   , threadBlocks :: [RecordID]
@@ -191,7 +193,7 @@ instance FromJSON Velocity where
     mult <- v .: "Multiplier"
     return $ Velocity dev tag mult
 
-newtype DevName = DevName Text deriving (FromJSON, Show, Read)
+newtype DevName = DevName Text deriving (FromJSON, Show, Read, Eq, Hashable)
 
 data Developer = Developer {
     devName :: DevName
@@ -239,14 +241,28 @@ toDiffs = Map.map (rec [])
       rec ((t2 - t1, mode2):a) ((t1, mode1):rest)
 
 data ScheduleVis = ScheduleVis { 
-    getVis :: Map.HashMap DevID [(Double, Maybe ThreadID)] 
-  } deriving (Generic, ScheduleVis)
+    getVis :: Map.HashMap DevName [(Double, Maybe ThreadName)] 
+  } deriving (Generic)
 
-schedule2vis :: Schedule -> ScheduleVis
-schedule2vis = ScheduleVis
+schedule2vis :: Table Thread 
+              -> Table Developer 
+              -> Schedule 
+              -> ScheduleVis
+schedule2vis thrTbl devTbl = 
+  ScheduleVis . Map.fromList . map replaceField . Map.toList   
+  where
+    replaceField (devId, timeline) = 
+      (devName $ select devTbl devId, map replaceThrName timeline)
+    replaceThrName (t, mThrId) = 
+      (t, fmap (threadName . select thrTbl) mThrId)
 
 instance Show ScheduleVis where
   show = BLC.unpack . encode 
+
+instance ToJSON ScheduleVis where
+  toJSON = object . map fromField . Map.toList . getVis
+    where
+      fromField ((DevName dev), timeline) = dev .= timeline
 
 data ScheduleParams = ScheduleParams { 
     w_unblocked :: Double
