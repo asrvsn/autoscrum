@@ -107,7 +107,6 @@ getTable tblStr = ynCached (tblStr <> "_table") $ do
   return tbl
   where
     opts = defaults & header "Authorization" .~ ["Bearer " <> api_key] 
-                    & param "view" .~ ["Main View"]
     url  = api_url <> tblStr
 
 getTableParts :: (FromJSON a) => Options -> String -> IO (Table a)
@@ -177,7 +176,7 @@ getBlockages blkTbl thrTbl thrId =
   map (\b -> (ThreadID $ blockedThread b, blockPercentage b)) $ 
     selectWhere blkTbl $ \_ blk -> 
          blockingThread blk == getThreadId thrId
-      && not (threadFinished $ select thrTbl thrId)
+      && not (threadFinished $ select thrTbl (blockedThread blk))
 
 getBlockedThreads :: Table Block 
                   -> Table Thread

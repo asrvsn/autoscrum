@@ -41,7 +41,7 @@ with open("schedule_vis.cache", 'r') as f_vis:
     )
 
     fig = go.Figure(data=traces, layout=layout)
-    url = py.iplot(fig, filename='marker-h-bar')
+    url = py.plot(fig, filename='marker-h-bar')
 
     with open("schedule_vis.url", 'w') as f_url:
         f_url.write(url)        
