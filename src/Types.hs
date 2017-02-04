@@ -10,6 +10,7 @@ module Types where
 import           Prelude hiding (lookup)
 
 import           GHC.Generics
+import           GHC.Stack
 
 import           Control.Applicative ((<|>))
 import           Data.HashMap.Strict (HashMap)
@@ -31,10 +32,10 @@ import           Debug.Trace
 
 trace' a b = trace (a <> show b) b
 
-lookup :: (Show k, Eq k, Hashable k, Show v) => HashMap k v -> k -> v
+lookup :: (HasCallStack, Show k, Eq k, Hashable k, Show v) => HashMap k v -> k -> v
 lookup mp k = case Map.lookup k mp of 
   Just v -> v
-  Nothing -> error $ "lookup failed in map: " <> show k <> "\nsource map: " <> show mp
+  Nothing -> error $ "lookup failed in map: " <> show k
 
 -- Core types
 
@@ -81,8 +82,11 @@ toList = Map.toList . tableRecords
 exists :: (IsRecord r) => Table a -> r -> Bool
 exists tbl rec = Map.member (toRec rec) (tableRecords tbl)
 
-select :: (IsRecord r, Show a) => Table a -> r -> a
-select tbl rec = tableRecords tbl `lookup` (toRec rec)
+select :: (HasCallStack, IsRecord r, Show a) => Table a -> r -> a
+select tbl rec = tableRecords tbl `lookup` toRec rec
+
+selectMaybe :: (IsRecord r, Show a) => Table a -> r -> Maybe a
+selectMaybe tbl rec = toRec rec `Map.lookup` tableRecords tbl 
 
 selectAll :: Table a -> [a]
 selectAll = map snd . toList
@@ -101,7 +105,8 @@ deleteWhere (Table recs off) f = Table (Map.filterWithKey (\k v -> not $ f k v) 
 
 -- ID types
 
-newtype ThreadID = ThreadID {getThreadId :: RecordID} deriving (Show, Read, Eq, Ord)
+newtype ThreadID = ThreadID {getThreadId :: RecordID} deriving (Show, Read, Eq, Ord, Generic)
+instance Hashable ThreadID
 instance IsRecord ThreadID where
   toRec (ThreadID rec) = rec
 
@@ -282,12 +287,14 @@ prettyRows maxLen = unlines . map (concat . map (\s -> " | " ++ block s))
   where
     block s = take maxLen s ++ replicate (max (length s) maxLen - length s) ' ' 
 
-data Priority = Priority ThreadID Double deriving (Show, Read)
+newtype Prioritization = Prioritization { 
+    getPrioritization :: (HashMap ThreadID Double) 
+  } deriving (Show, Read)
 
-instance Debug (Table Thread, [Priority]) where 
-  debug (thrTbl, priorities) = 
-    prettyRows 20 $ for priorities $ \(Priority (ThreadID t) p) -> 
-      [debug (select thrTbl t), show p]
+-- instance Debug (Table Thread, [Priority]) where 
+--   debug (thrTbl, priorities) = 
+--     prettyRows 20 $ for priorities $ \(Priority (ThreadID t) p) -> 
+--       [debug (select thrTbl t), show p]
 
 -- Debug class
 

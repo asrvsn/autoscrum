@@ -8,16 +8,9 @@ import Constants
 
 import System.Exit (exitSuccess)
 
-opts :: [String]
-opts = [
-    "prioritize"
-  , "schedule"
-  , "train"
-  ]
-
 main :: IO ()
 main = do
-  putStrLn "===== ALPHASHEETS TASK SCHEDULER ====="
+  putStrLn "\n===== ALPHASHEETS TASK SCHEDULER ====="
 
   cmdOptions [
       "prioritize"
@@ -25,8 +18,8 @@ main = do
     , "train"
     , "download"
     , "upload"
-    , "visualize"
-    , "exit"
+    , "visualize schedule"
+    , "lookup record"
     ] $ \case
 
       "prioritize" -> do
@@ -34,8 +27,8 @@ main = do
         blkTbl <- getTable "Blocks" 
         cntTbl <- getTable "Containments" 
 
-        let priorities = computePriorities thrTbl blkTbl cntTbl 
-        persist "priorities" priorities
+        let prioritization = computePrioritization thrTbl blkTbl cntTbl 
+        persist "prioritization" prioritization
         putStrLn "...Done."
 
       "schedule" -> do
@@ -61,7 +54,7 @@ main = do
         yn "see visualization?" visualizeSchedule (pure ())
 
       "train" -> do
-        error "not implemented"
+        putStrLn "not implemented"
 
       "download" -> do
         getTable "Threads" :: IO (Table Thread)
@@ -82,14 +75,52 @@ main = do
               uploadSchedule schedule 
               putStrLn "done."
             "priorities" -> do
-              priorities <- retrieve "priorities" :: IO [Priority]
-              mapM_ uploadPriority priorities 
+              prioritization <- retrieve "prioritization" :: IO Prioritization
+              uploadPrioritization prioritization 
               putStrLn "done."
 
-      "visualize" -> visualizeSchedule
+      "visualize schedule" -> visualizeSchedule
 
-      "exit" -> do
-        putStrLn "===== EXITED ====="
-        exitSuccess
+      "lookup record" -> do
+        cmdOptions [
+            "threads"
+          , "blocks"
+          , "containments"
+          , "developers"
+          , "task types"
+          , "velocities"
+          ] $ \case
+            "threads" -> do
+              putStrLn "Enter record from Threads table:"
+              resp <- getLine
+              thrTbl <- getTable "Threads" :: IO (Table Thread)
+              putStrLn . show $ selectMaybe thrTbl resp
+            "blocks" -> do
+              putStrLn "Enter record from Blocks table:"
+              resp <- getLine
+              blkTbl <- getTable "Blocks" :: IO (Table Block)
+              putStrLn . show $ selectMaybe blkTbl resp
+            "containments" -> do
+              putStrLn "Enter record from Containments table:"
+              resp <- getLine
+              cntTbl <- getTable "Containments" :: IO (Table Containment)
+              putStrLn . show $ selectMaybe cntTbl resp
+            "developers" -> do
+              putStrLn "Enter record from Developers table:"
+              resp <- getLine
+              devTbl <- getTable "Developers" :: IO (Table Developer)
+              putStrLn . show $ selectMaybe devTbl resp
+            "task types" -> do
+              putStrLn "Enter record from Task Types table:"
+              resp <- getLine
+              tagTbl <- getTable "Task Types" :: IO (Table Tag)
+              putStrLn . show $ selectMaybe tagTbl resp
+            "velocities" -> do
+              putStrLn "Enter record from Velocities table:"
+              resp <- getLine
+              velTbl <- getTable "Velocities" :: IO (Table Velocity)
+              putStrLn . show $ selectMaybe velTbl resp
+
+  putStrLn "===== EXITED ====="
 
 

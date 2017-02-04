@@ -9,11 +9,13 @@ import           Constants
 
 import           Prelude hiding (lookup)
 
+import           GHC.Stack
 import           System.Random
 import           System.Directory (doesFileExist)
 import           System.Process (system)
 import           Network.Wreq
 import           Control.Lens ((^.), (.~), (&))
+import           Text.Read (readMaybe)
 import           Data.Monoid
 import           Data.Hashable
 import           Data.List (find, minimumBy)
@@ -61,17 +63,26 @@ ynCached fname n = do
 
 cmdOptions :: [String] -> (String -> IO ()) -> IO ()
 cmdOptions opts f = do
-  putStrLn "The following actions are available:"
-  putStrLn $ "\n" <> unlines opts
+  putStrLn "\nThe following options are available:"
+  putStrLn $ "\n" <> unlines prettyOpts
   putStrLn "\nWhat would you like to do?"
   resp <- getLine
-  case find (== resp) opts of 
-    Just _ -> do
-      f resp 
-      cmdOptions opts f
-    Nothing -> do
-      putStrLn "That's not an available action."
-      cmdOptions opts f
+  case find (== resp) optsWithExit of 
+    Just _ -> cont resp
+    Nothing -> 
+      case readMaybe resp :: Maybe Int of 
+        Just i -> if i <= length optsWithExit
+          then cont (optsWithExit !! (i - 1))
+          else err
+        Nothing -> err
+  where
+    optsWithExit = opts <> ["exit"]
+    prettyOpts = zipWith (\n o -> show n <> ") " <> o) [1..] optsWithExit
+    err = do putStrLn "That's not an available option."
+             cmdOptions opts f
+    cont resp = case resp of 
+                  "exit" -> return ()
+                  _ -> f resp >> cmdOptions opts f
 
 -- API methods
 
@@ -85,7 +96,7 @@ visualizeSchedule :: IO ()
 visualizeSchedule = do
   system "python visualize.py"
   url <- readFile "schedule_vis.url"
-  system "google-chrome schedule_vis.url"
+  system $ "google-chrome " <> url
   return ()
 
 getTable :: (FromJSON a, Show a, Read a) => String -> IO (Table a)
@@ -119,8 +130,8 @@ fromResp r = decoder $ r ^. responseBody
       Left e -> error $ e <> "\nSource string: " <> show b
       Right r -> r
 
-uploadPriority :: Priority -> IO ()
-uploadPriority = undefined
+uploadPrioritization :: Prioritization -> IO ()
+uploadPrioritization = undefined
 
 uploadSchedule :: Schedule -> IO ()
 uploadSchedule = undefined
@@ -281,7 +292,15 @@ unfairCoin p = flip <$> getStdRandom (randomR (1,100))
 bayesNet :: Table Thread 
          -> Table Containment 
          -> (HashMap RecordID (TDV Bool), JunctionTree CPT)
-bayesNet thrTbl cntTbl = (varMap, junctionTree)
+bayesNet thrTbl cntTbl = 
+  let varMapKeys = Set.fromList (Map.keys varMap)
+  in if varMapKeys == varKeys
+    then (varMap, junctionTree)
+    else error $ 
+         "invariant violation: the variable map has additional records \n" 
+      <> show (varMapKeys `Set.difference` varKeys)
+      <> "\n and the threads table has additional records \n"
+      <> show (varKeys `Set.difference` varMapKeys)
   where
     junctionTree = createJunctionTree nodeComparisonForTriangulation net
 
@@ -325,7 +344,8 @@ bayesNet thrTbl cntTbl = (varMap, junctionTree)
 
     masterThrId = getMasterThread thrTbl
 
-marginalInclusion :: HashMap RecordID (TDV Bool) 
+marginalInclusion :: (HasCallStack) 
+                  => HashMap RecordID (TDV Bool) 
                   -> JunctionTree CPT
                   -> ThreadID
                   -> Double
@@ -343,7 +363,7 @@ taskPriority :: Table Thread
              -> ThreadID -- given thread ID
              -> Double
 taskPriority thrTbl blkTbl cntTbl varMap juncTree thrId = 
-  case getBlockages blkTbl thrTbl thrId of 
+  case getBlockages blkTbl thrTbl (trace' "taskPriority thrId" thrId) of 
 
     [] -> 
       let p = marginalInclusion varMap juncTree thrId
@@ -359,34 +379,36 @@ taskPriority thrTbl blkTbl cntTbl varMap juncTree thrId =
 
       in sum $ map (uncurry blockagePriority) xs
 
-computePriorities :: Table Thread
-                 -> Table Block
-                 -> Table Containment
-                 -> [Priority]
-computePriorities thrTbl blkTbl cntTbl = 
-  map getPriority tasks
+computePrioritization :: Table Thread
+                   -> Table Block
+                   -> Table Containment
+                   -> Prioritization
+computePrioritization thrTbl blkTbl cntTbl = 
+  Prioritization . Map.fromList $ 
+    zip tasks (map getPriority tasks)
   where
-    tasks       = map ThreadID $ selectKeyWhere thrTbl $ \_ thr -> threadAssignable thr
+    tasks       = map ThreadID (selectAllKeys thrTbl)
     (varMap, juncTree) = bayesNet thrTbl cntTbl
-    getPriority t = Priority t (taskPriority thrTbl blkTbl cntTbl varMap juncTree t)
+    getPriority = taskPriority thrTbl blkTbl cntTbl varMap juncTree 
 
 computeSchedule :: Table Thread
-         -> Table Block
-         -> Table Containment
-         -> Table Developer 
-         -> Table Tag 
-         -> Table Velocity 
-         -> ScheduleParams
-         -> Schedule
+                 -> Table Block
+                 -> Table Containment
+                 -> Table Developer 
+                 -> Table Tag 
+                 -> Table Velocity 
+                 -> ScheduleParams
+                 -> Schedule
 computeSchedule thrTbl blkTbl cntTbl devTbl tagTbl velTbl prms = 
   execState lptSchedule initSchedule
   where
     devs  = selectAllKeys devTbl
-    tasks = selectKeyWhere thrTbl $ \_ thr -> threadAssignable thr
 
     initSchedule = Map.fromList $ zip (map DevID devs) (repeat [])
 
     masterThrId = getMasterThread thrTbl
+
+    prioritization = computePrioritization thrTbl blkTbl cntTbl
 
     lptSchedule :: State Schedule ()
     lptSchedule = do
@@ -420,7 +442,7 @@ computeSchedule thrTbl blkTbl cntTbl devTbl tagTbl velTbl prms =
       -- (2) dev completion time
       let t_elapsed = taskCompletionTime tagTbl thrTbl devTbl velTbl thrId devId   
       -- (3) task priority
-      let priority = taskPriority thrTbl blkTbl cntTbl varMap juncTree thrId
+      let priority = getPrioritization prioritization `lookup` thrId
       return $ 
           w_unblocked prms * t_unblocked
         + w_elapsed prms * t_elapsed
