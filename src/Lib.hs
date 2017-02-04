@@ -186,7 +186,7 @@ getBlockedThreads blkTbl thrTbl thrId =
   map (ThreadID . blockedThread) $ 
     selectWhere blkTbl $ \_ blk -> 
          blockingThread blk == getThreadId thrId
-      && not (threadFinished $ select thrTbl thrId)
+      && not (threadFinished $ select thrTbl (blockedThread blk))
 
 getBlockingThreads :: Table Block 
                     -> Table Thread
@@ -362,7 +362,7 @@ taskPriority :: Table Thread
              -> ThreadID -- given thread ID
              -> Double
 taskPriority thrTbl blkTbl cntTbl varMap juncTree thrId = 
-  case getBlockages blkTbl thrTbl (trace' "taskPriority thrId" thrId) of 
+  case getBlockages blkTbl thrTbl thrId of 
 
     [] -> 
       let p = marginalInclusion varMap juncTree thrId
