@@ -5,6 +5,7 @@
 module Lib where
 
 import           Types
+import           Missing
 import           Constants
 
 import           Prelude hiding (lookup)
@@ -13,6 +14,7 @@ import           GHC.Stack
 import           System.Random
 import           System.Directory (doesFileExist)
 import           System.Process (system)
+import           System.Exit (ExitCode(..))
 import           Network.Wreq
 import           Control.Lens ((^.), (.~), (&))
 import           Text.Read (readMaybe)
@@ -54,12 +56,15 @@ yn ask y n = do
     "N" -> n
     _   -> yn ask y n
 
-ynCached :: (Read a) => String -> IO a -> IO a
+ynCached :: (Show a, Read a) => String -> IO a -> IO a
 ynCached fname n = do
   b <- doesFileExist (fname <> ".cache")
   if b 
     then yn ("Use cached " <> fname <> "?") (retrieve fname) n
-    else n
+    else do
+      a <- n
+      persist fname a
+      return a
 
 cmdOptions :: [String] -> (String -> IO ()) -> IO ()
 cmdOptions opts f = do
@@ -84,6 +89,27 @@ cmdOptions opts f = do
                   "exit" -> return ()
                   _ -> f resp >> cmdOptions opts f
 
+enterParameters :: IO ScheduleParams 
+enterParameters = 
+  ScheduleParams <$> reqDouble "w_completed"
+                 <*> reqDouble "w_priority"
+  where
+    reqDouble s = do
+      putStrLn $ "Enter " <> s
+      resp <- getLine
+      case readMaybe resp :: Maybe Double of 
+        Just d -> return d
+        Nothing -> reqDouble s
+
+mightNeedSudo :: String -> IO ExitCode
+mightNeedSudo cmd = do
+  e <- system cmd
+  case e of 
+    ExitFailure 1 -> do
+      putStrLn $ show cmd <> " failed, trying with sudo"
+      system $ "sudo " <> cmd
+    _ -> return e
+
 -- API methods
 
 persist :: (Show a) => String -> a -> IO ()
@@ -102,7 +128,6 @@ visualizeSchedule = do
 getTable :: (FromJSON a, Show a, Read a) => String -> IO (Table a)
 getTable tblStr = ynCached (tblStr <> "_table") $ do
   tbl <- getTableParts opts url 
-  persist (tblStr <> "_table") tbl
   putStrLn $ "Downloaded " <> tblStr
   return tbl
   where
@@ -370,7 +395,7 @@ taskPriority thrTbl blkTbl cntTbl varMap juncTree thrId =
           story = threadStoryPts thr
           blockage = blockageFactor thrTbl blkTbl cntTbl thrId 
 
-      in (-1) * log (1 - (15/16) * p) / (story * blockage)
+      in (-1) * log (1 - (63/64) * p) / (story * blockage)
 
     xs -> 
       let blockagePriority blkThrId blkPerc = 
@@ -399,7 +424,7 @@ computeSchedule :: Table Thread
                  -> ScheduleParams
                  -> Schedule
 computeSchedule thrTbl blkTbl cntTbl devTbl tagTbl velTbl prms = 
-  execState lptSchedule initSchedule
+  execState flushTasks initSchedule
   where
     devs  = selectAllKeys devTbl
 
@@ -409,21 +434,24 @@ computeSchedule thrTbl blkTbl cntTbl devTbl tagTbl velTbl prms =
 
     prioritization = computePrioritization thrTbl blkTbl cntTbl
 
-    lptSchedule :: State Schedule ()
-    lptSchedule = do
+    (varMap, juncTree) = bayesNet thrTbl cntTbl
+
+    flushTasks :: State Schedule ()
+    flushTasks = do
       ts <- getUnblockedTasks
       case ts of 
         [] -> return ()
         _  -> do
           let possibleAssignments = [(t, DevID d) | t <- ts, d <- devs]
-          rs <- mapM (uncurry assignmentRank) possibleAssignments
-          let ((t, d), _) = minimumBy (compare `on` snd) (zip possibleAssignments rs)
+          features <- mapM (uncurry assignmentFeatures) possibleAssignments
+          let losses = map (loss prms) (rescaleFeatures features)
+          let ((t, d), _) = minimumBy (compare `on` snd) (zip possibleAssignments losses)
           assign t d
-          lptSchedule
+          flushTasks
 
     getUnblockedTasks :: State Schedule [ThreadID]
     getUnblockedTasks = do
-      completed <- gets $ Set.fromList . catMaybes . map snd . concat . Map.elems
+      completed <- gets completedTasks
       return $ map ThreadID $ 
         selectKeyWhere thrTbl $ \thrId thr -> 
           let blocks = Set.fromList (getBlockingThreads blkTbl thrTbl $ ThreadID thrId) 
@@ -431,9 +459,8 @@ computeSchedule thrTbl blkTbl cntTbl devTbl tagTbl velTbl prms =
              && ThreadID thrId `Set.notMember` completed
              && not (threadFinished thr)
 
-    -- the lower the rank, the better the assigment
-    assignmentRank :: ThreadID -> DevID -> State Schedule Double
-    assignmentRank thrId devId = do
+    assignmentFeatures :: ThreadID -> DevID -> State Schedule Features
+    assignmentFeatures thrId devId = do
       -- (1) time to task unblocked (by dev availability as well as blocking threads)
       t_task <- getTaskAvailability thrId
       t_dev  <- getDevAvailability devId
@@ -442,10 +469,10 @@ computeSchedule thrTbl blkTbl cntTbl devTbl tagTbl velTbl prms =
       let t_elapsed = taskCompletionTime tagTbl thrTbl devTbl velTbl thrId devId   
       -- (3) task priority
       let priority = getPrioritization prioritization `lookup` thrId
-      return $ 
-          w_unblocked prms * t_unblocked
-        + w_elapsed prms * t_elapsed
-        + w_priority prms * priority
+      return $ Features {
+          f_completed = t_unblocked + t_elapsed
+        , f_priority = priority
+        }
 
     assign :: ThreadID -> DevID -> State Schedule ()
     assign thrId devId = do
@@ -453,33 +480,24 @@ computeSchedule thrTbl blkTbl cntTbl devTbl tagTbl velTbl prms =
       t_task <- getTaskAvailability thrId
       t_dev  <- getDevAvailability devId
       let elapsed = if t_task > t_dev 
-                      then [(t_task, Nothing), (t_task + dt_task, Just thrId)]
+                      then [(t_task + dt_task, Just thrId), (t_task, Nothing)]
                       else [(t_dev + dt_task, Just thrId)]
       modify $ 
         Map.adjust (\ts -> elapsed ++ ts) devId
-      -- liftIO $ putStrLn $ 
-      --      "Assigned " 
-      --   ++ debug (select thrTbl thrId) 
-      --   ++ " to " 
-      --   ++ debug (select devTbl devId)
-      --   ++ " at time " 
-      --   ++ show (max t_task t_dev)
-      --   ++ " taking "
-      --   ++ show dt_task
 
-    getTaskAvailability :: ThreadID -> State Schedule Double
+    getTaskAvailability :: HasCallStack => ThreadID -> State Schedule Double
     getTaskAvailability thrId = do
       let blkThrs = getBlockingThreads blkTbl thrTbl thrId
       blkTimes <- mapM getCompletedTaskTime blkThrs
       return $ case blkTimes of 
         [] -> 0
-        _  -> maximum blkTimes
+        _  -> assertPositive $ maximum blkTimes
 
-    getDevAvailability :: DevID -> State Schedule Double
+    getDevAvailability :: HasCallStack => DevID -> State Schedule Double
     getDevAvailability devId = gets $ \mp -> 
       case mp `lookup` devId of
         []   -> 0
-        t:ts -> fst t 
+        t:ts -> assertPositive $ fst t 
 
     getCompletedTaskTime :: ThreadID -> State Schedule Double
     getCompletedTaskTime thrId = gets $ \mp -> 
@@ -489,4 +507,24 @@ computeSchedule thrTbl blkTbl cntTbl devTbl tagTbl velTbl prms =
                                   Nothing -> rec rest
       in rec (Map.elems mp) 
 
-    (varMap, juncTree) = bayesNet thrTbl cntTbl
+    assertPositive :: HasCallStack => Double -> Double
+    assertPositive i = if i > 0 then i else error "assertPositive failed"
+
+-- the lower the loss, the better the assigment
+loss :: ScheduleParams -> Features -> Double
+loss p f = 
+  -- compute loss as a sum of weighted squares 
+  sum [
+      w_completed p * f_completed f'
+    , w_priority p * f_priority f'
+    ]
+  where
+    f' = (f + fromInteger 1) ** fromInteger 2 -- recenter and square
+
+-- rescale features to [0,1] U {-Infinity, Infinity}
+rescaleFeatures :: [Features] -> [Features]
+rescaleFeatures fs = map (f_unop fromNaN . (\x -> (x - x_min) / (x_max - x_min))) fs
+  where
+    fromNaN a = if isNaN a then 0 else a
+    x_min = f_nop (minimum . filter (not . isInfinite)) fs
+    x_max = f_nop (maximum . filter (not . isInfinite)) fs

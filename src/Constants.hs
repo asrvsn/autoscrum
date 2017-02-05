@@ -17,8 +17,7 @@ master_thread_name = ThreadName "Valuable at work"
 
 default_sched_params :: ScheduleParams
 default_sched_params = ScheduleParams {
-    w_unblocked = 1.0
-  , w_elapsed   = 1.0
+    w_completed = 1.0
   , w_priority  = 1.0
   }
 

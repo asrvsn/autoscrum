@@ -4,23 +4,30 @@ module Main where
 
 import Lib
 import Types
+import Missing
 import Constants
 
-import System.Exit (exitSuccess)
+import System.Process (system)
 
 main :: IO ()
 main = do
   putStrLn "\n===== ALPHASHEETS TASK SCHEDULER ====="
 
   cmdOptions [
-      "prioritize"
+      "first-time setup"
+    , "prioritize"
     , "schedule"
-    , "train"
     , "download"
     , "upload"
     , "visualize schedule"
     , "lookup record"
     ] $ \case
+
+      "first-time setup" -> do
+        mightNeedSudo "pip install plotly shortid"
+        system "mkdir ~/.plotly"
+        system "cp .plotly/.credentials ~/.plotly/"
+        return ()
 
       "prioritize" -> do
         thrTbl <- getTable "Threads"
@@ -39,7 +46,10 @@ main = do
         tagTbl <- getTable "Task Types" 
         velTbl <- getTable "Velocities" 
 
-        prms <- ynCached "sched_params" (return default_sched_params)
+        prms <- ynCached "sched_params" $ 
+          yn  "use default parameters?" 
+              (return default_sched_params) 
+              enterParameters
 
         putStrLn "\nComputing schedule using parameters:\n"
         putStrLn $ debug prms
@@ -52,9 +62,6 @@ main = do
         persist "schedule_vis" (schedule2vis thrTbl devTbl schedule)
 
         yn "see visualization?" visualizeSchedule (pure ())
-
-      "train" -> do
-        putStrLn "not implemented"
 
       "download" -> do
         getTable "Threads" :: IO (Table Thread)
@@ -122,5 +129,3 @@ main = do
               putStrLn . show $ selectMaybe velTbl resp
 
   putStrLn "===== EXITED ====="
-
-

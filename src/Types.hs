@@ -7,6 +7,8 @@
 
 module Types where
 
+import           Missing
+
 import           Prelude hiding (lookup)
 
 import           GHC.Generics
@@ -15,27 +17,19 @@ import           GHC.Stack
 import           Control.Applicative ((<|>))
 import           Data.HashMap.Strict (HashMap)
 import qualified Data.HashMap.Strict as Map
+import           Data.Set (Set)
+import qualified Data.Set as Set
 import           Data.Aeson
 import           Data.Aeson.Types
 import           Data.Text (Text)
 import qualified Data.Text as T
+import qualified Data.List (maximum, minimum)
 import           Data.Monoid
 import           Data.Hashable
 import           Data.Traversable (for)
 import           Data.Foldable (foldl', foldlM)
-import           Data.Maybe (isJust)
+import           Data.Maybe (isJust, catMaybes)
 import qualified Data.ByteString.Lazy.Char8 as BLC
-
-import           Debug.Trace
-
--- Core helpers
-
-trace' a b = trace (a <> show b) b
-
-lookup :: (HasCallStack, Show k, Eq k, Hashable k, Show v) => HashMap k v -> k -> v
-lookup mp k = case Map.lookup k mp of 
-  Just v -> v
-  Nothing -> error $ "lookup failed in map: " <> show k
 
 -- Core types
 
@@ -240,10 +234,13 @@ getBlockedTime mp devId =
 toDiffs :: Schedule -> Schedule 
 toDiffs = Map.map (rec [])
   where
-    rec a [] = reverse a
+    rec a [] = a
     rec a ((t1, mode1):[]) = (t1, mode1):a
     rec a ((t2, mode2):(t1, mode1):rest) = 
       rec ((t2 - t1, mode2):a) ((t1, mode1):rest)
+
+completedTasks :: Schedule -> Set ThreadID
+completedTasks = Set.fromList . catMaybes . map snd . concat . Map.elems
 
 data ScheduleVis = ScheduleVis { 
     getVis :: Map.HashMap DevName [(Double, Maybe ThreadName)] 
@@ -254,7 +251,7 @@ schedule2vis :: Table Thread
               -> Schedule 
               -> ScheduleVis
 schedule2vis thrTbl devTbl = 
-  ScheduleVis . Map.fromList . map replaceField . Map.toList   
+  ScheduleVis . Map.fromList . map replaceField . Map.toList . toDiffs
   where
     replaceField (devId, timeline) = 
       (devName $ select devTbl devId, map replaceThrName timeline)
@@ -270,22 +267,72 @@ instance ToJSON ScheduleVis where
       fromField ((DevName dev), timeline) = dev .= timeline
 
 data ScheduleParams = ScheduleParams { 
-    w_unblocked :: Double
-  , w_elapsed :: Double
+    w_completed :: Double
   , w_priority :: Double
   } deriving (Read, Show)
 
 instance Debug ScheduleParams where
   debug prms = prettyRows 20 [
-      ["w_unblocked", show $ w_unblocked prms]
-    , ["w_elapsed", show $ w_elapsed prms]
+      ["w_completed", show $ w_completed prms]
     , ["w_priority", show $ w_priority prms]
     ]
 
-prettyRows :: Int -> [[String]] -> String  
-prettyRows maxLen = unlines . map (concat . map (\s -> " | " ++ block s))
-  where
-    block s = take maxLen s ++ replicate (max (length s) maxLen - length s) ' ' 
+data Features = Features {
+    f_completed :: Double
+  , f_priority :: Double
+  } deriving (Show)
+
+instance Num Features where
+  (+) = f_binop (+)
+  (-) = f_binop (-)
+  (*) = f_binop (*)
+  abs = f_unop abs
+  signum = f_unop signum
+  fromInteger = f_equilateral . fromInteger
+
+instance Fractional Features where
+  fromRational = f_equilateral . fromRational
+  (/) = f_binop (/)
+
+instance Floating Features where
+  pi = f_equilateral pi
+  exp = f_unop exp
+  log = f_unop log
+  sqrt = f_unop sqrt
+  sin = f_unop sin
+  cos = f_unop cos
+  asin = f_unop asin
+  acos = f_unop acos
+  atan = f_unop atan
+  sinh = f_unop sinh
+  cosh = f_unop cosh
+  asinh = f_unop asinh
+  acosh = f_unop acosh
+  atanh = f_unop atanh
+
+f_equilateral :: Double -> Features
+f_equilateral d = Features {
+    f_completed = d
+  , f_priority = d
+  }
+
+f_unop :: (Double -> Double) -> Features -> Features
+f_unop func f = Features {
+    f_completed = func (f_completed f)
+  , f_priority = func (f_priority f)
+  }
+
+f_binop :: (Double -> Double -> Double) -> Features -> Features -> Features
+f_binop func f1 f2 = Features {
+    f_completed = func (f_completed f1) (f_completed f2)
+  , f_priority = func (f_priority f1) (f_priority f2)
+  }
+
+f_nop :: ([Double] -> Double) -> [Features] -> Features
+f_nop func fs = Features {
+    f_completed = func (map f_completed fs)
+  , f_priority = func (map f_priority fs)
+  }
 
 newtype Prioritization = Prioritization { 
     getPrioritization :: (HashMap ThreadID Double) 
@@ -295,9 +342,3 @@ newtype Prioritization = Prioritization {
 --   debug (thrTbl, priorities) = 
 --     prettyRows 20 $ for priorities $ \(Priority (ThreadID t) p) -> 
 --       [debug (select thrTbl t), show p]
-
--- Debug class
-
-class Debug a where
-  debug :: a -> String
-
