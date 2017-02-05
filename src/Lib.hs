@@ -120,10 +120,15 @@ retrieve fname = read <$> readFile (fname <> ".cache")
 
 visualizeSchedule :: IO () 
 visualizeSchedule = do
-  system "python visualize.py"
-  url <- readFile "schedule_vis.url"
-  system $ "google-chrome " <> url
-  return ()
+  b <- doesFileExist "schedule_vis.cache"
+  if b 
+    then do
+      system "python visualize.py"
+      url <- readFile "schedule_vis.url"
+      system $ "google-chrome " <> url
+      return ()
+    else 
+      putStrLn "Error: you need to run \"schedule\" first."
 
 getTable :: (FromJSON a, Show a, Read a) => String -> IO (Table a)
 getTable tblStr = ynCached (tblStr <> "_table") $ do

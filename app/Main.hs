@@ -14,16 +14,16 @@ main = do
   putStrLn "\n===== ALPHASHEETS TASK SCHEDULER ====="
 
   cmdOptions [
-      "first-time setup"
+      "first-time setup (run this if you haven't)"
     , "prioritize"
     , "schedule"
-    , "download"
-    , "upload"
+    , "download..."
+    , "upload..."
     , "visualize schedule"
     , "lookup record"
     ] $ \case
 
-      "first-time setup" -> do
+      "first-time setup (run this if you haven't)" -> do
         mightNeedSudo "pip install plotly shortid"
         system "mkdir ~/.plotly"
         system "cp .plotly/.credentials ~/.plotly/"
@@ -63,7 +63,7 @@ main = do
 
         yn "see visualization?" visualizeSchedule (pure ())
 
-      "download" -> do
+      "download..." -> do
         getTable "Threads" :: IO (Table Thread)
         getTable "Blocks" :: IO (Table Block)
         getTable "Containments" :: IO (Table Containment)
@@ -72,7 +72,7 @@ main = do
         getTable "Velocities" :: IO (Table Velocity)
         return ()
 
-      "upload" -> do
+      "upload..." -> do
         cmdOptions [
             "schedule"
           , "priorities"
