@@ -34,6 +34,7 @@ library
                      , lens
                      , directory
                      , process
+                     , airtable-api
   default-language:    Haskell2010
 
 executable airtable-exe
@@ -43,6 +44,7 @@ executable airtable-exe
   build-depends:       base
                      , airtable
                      , process
+                     , airtable-api
   default-language:    Haskell2010
 
 test-suite airtable-test

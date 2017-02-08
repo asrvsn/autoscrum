@@ -9,9 +9,17 @@ import Constants
 
 import System.Process (system)
 
+import Airtable.Table
+import Airtable.Query
+
 main :: IO ()
 main = do
   putStrLn "\n===== ALPHASHEETS TASK SCHEDULER ====="
+
+  let opts = AirtableOptions { apiKey = api_key
+                             , appId = app_id
+                             , apiVersion = 0
+                             }
 
   cmdOptions [
       "first-time setup (run this if you haven't)"
@@ -30,21 +38,21 @@ main = do
         return ()
 
       "prioritize" -> do
-        thrTbl <- getTable "Threads"
-        blkTbl <- getTable "Blocks" 
-        cntTbl <- getTable "Containments" 
+        thrTbl <- getTable opts "Threads"
+        blkTbl <- getTable opts "Blocks" 
+        cntTbl <- getTable opts "Containments" 
 
         let prioritization = computePrioritization thrTbl blkTbl cntTbl 
         persist "prioritization" prioritization
         putStrLn "...Done."
 
       "schedule" -> do
-        thrTbl <- getTable "Threads"
-        blkTbl <- getTable "Blocks" 
-        cntTbl <- getTable "Containments" 
-        devTbl <- getTable "Developers" 
-        tagTbl <- getTable "Task Types" 
-        velTbl <- getTable "Velocities" 
+        thrTbl <- getTable opts "Threads"
+        blkTbl <- getTable opts "Blocks" 
+        cntTbl <- getTable opts "Containments" 
+        devTbl <- getTable opts "Developers" 
+        tagTbl <- getTable opts "Task Types" 
+        velTbl <- getTable opts "Velocities" 
 
         prms <- ynCached "sched_params" $ 
           yn  "use default parameters?" 
@@ -64,12 +72,12 @@ main = do
         yn "see visualization?" visualizeSchedule (pure ())
 
       "download..." -> do
-        getTable "Threads" :: IO (Table Thread)
-        getTable "Blocks" :: IO (Table Block)
-        getTable "Containments" :: IO (Table Containment)
-        getTable "Developers" :: IO (Table Developer)
-        getTable "Task Types" :: IO (Table Tag)
-        getTable "Velocities" :: IO (Table Velocity)
+        getTable opts "Threads" :: IO (Table Thread)
+        getTable opts "Blocks" :: IO (Table Block)
+        getTable opts "Containments" :: IO (Table Containment)
+        getTable opts "Developers" :: IO (Table Developer)
+        getTable opts "Task Types" :: IO (Table Tag)
+        getTable opts "Velocities" :: IO (Table Velocity)
         return ()
 
       "upload..." -> do
@@ -100,32 +108,32 @@ main = do
             "threads" -> do
               putStrLn "Enter record from Threads table:"
               resp <- getLine
-              thrTbl <- getTable "Threads" :: IO (Table Thread)
+              thrTbl <- getTable opts "Threads" :: IO (Table Thread)
               putStrLn . show $ selectMaybe thrTbl resp
             "blocks" -> do
               putStrLn "Enter record from Blocks table:"
               resp <- getLine
-              blkTbl <- getTable "Blocks" :: IO (Table Block)
+              blkTbl <- getTable opts "Blocks" :: IO (Table Block)
               putStrLn . show $ selectMaybe blkTbl resp
             "containments" -> do
               putStrLn "Enter record from Containments table:"
               resp <- getLine
-              cntTbl <- getTable "Containments" :: IO (Table Containment)
+              cntTbl <- getTable opts "Containments" :: IO (Table Containment)
               putStrLn . show $ selectMaybe cntTbl resp
             "developers" -> do
               putStrLn "Enter record from Developers table:"
               resp <- getLine
-              devTbl <- getTable "Developers" :: IO (Table Developer)
+              devTbl <- getTable opts "Developers" :: IO (Table Developer)
               putStrLn . show $ selectMaybe devTbl resp
             "task types" -> do
               putStrLn "Enter record from Task Types table:"
               resp <- getLine
-              tagTbl <- getTable "Task Types" :: IO (Table Tag)
+              tagTbl <- getTable opts "Task Types" :: IO (Table Tag)
               putStrLn . show $ selectMaybe tagTbl resp
             "velocities" -> do
               putStrLn "Enter record from Velocities table:"
               resp <- getLine
-              velTbl <- getTable "Velocities" :: IO (Table Velocity)
+              velTbl <- getTable opts "Velocities" :: IO (Table Velocity)
               putStrLn . show $ selectMaybe velTbl resp
 
   putStrLn "===== EXITED ====="

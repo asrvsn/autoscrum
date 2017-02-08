@@ -6,10 +6,10 @@ import Types
 import Data.Text (Text)
 import Data.ByteString (ByteString)
 
-api_url :: String
-api_url = "https://api.airtable.com/v0/appfGT5ACymqznlOP/"
+app_id :: String
+app_id = "appfGT5ACymqznlOP"
 
-api_key :: ByteString
+api_key :: String
 api_key = "keyDSaC5Xv0BoKTSD"
 
 master_thread_name :: ThreadName

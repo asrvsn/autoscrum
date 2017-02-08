@@ -7,6 +7,10 @@ resolver: lts-7.15
 # Local packages, usually specified by relative directory name
 packages:
 - '.'
+- location:
+    git: https://github.com/ooblahman/airtable-api.git
+    commit: 12feee2e30ff49216a216dfa43abc1f97a8a9178
+  extra-dep: true
 # Packages to be pulled from upstream that are not in the resolver (e.g., acme-missiles-0.3)
 extra-deps: []
 

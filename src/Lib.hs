@@ -16,6 +16,8 @@ import           System.Directory (doesFileExist)
 import           System.Process (system)
 import           System.Exit (ExitCode(..))
 import           Network.Wreq
+import           Airtable.Table
+import           Airtable.Query
 import           Control.Lens ((^.), (.~), (&))
 import           Text.Read (readMaybe)
 import           Data.Monoid
@@ -129,35 +131,6 @@ visualizeSchedule = do
       return ()
     else 
       putStrLn "Error: you need to run \"schedule\" first."
-
-getTable :: (FromJSON a, Show a, Read a) => String -> IO (Table a)
-getTable tblStr = ynCached (tblStr <> "_table") $ do
-  tbl <- getTableParts opts url 
-  putStrLn $ "Downloaded " <> tblStr
-  return tbl
-  where
-    opts = defaults & header "Authorization" .~ ["Bearer " <> api_key] 
-    url  = api_url <> tblStr
-
-getTableParts :: (FromJSON a) => Options -> String -> IO (Table a)
-getTableParts opts url = do
-  resp <- getWith opts url
-  getMore (fromResp resp)
-  where
-    getMore tbl = case tableOffset tbl of 
-      Just offset -> do
-        resp <- getWith (opts & param "offset" .~ [offset]) url
-        putStrLn $ "Part " <> show offset
-        getMore $ fromResp resp <> tbl
-      Nothing -> 
-        pure tbl
-
-fromResp :: (FromJSON a) => Response ByteString -> Table a
-fromResp r = decoder $ r ^. responseBody
-  where
-    decoder b = case eitherDecode b of 
-      Left e -> error $ e <> "\nSource string: " <> show b
-      Right r -> r
 
 uploadPrioritization :: Prioritization -> IO ()
 uploadPrioritization = undefined

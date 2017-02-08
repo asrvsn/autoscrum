@@ -31,71 +31,8 @@ import           Data.Foldable (foldl', foldlM)
 import           Data.Maybe (isJust, catMaybes)
 import qualified Data.ByteString.Lazy.Char8 as BLC
 
--- Core types
+import           Airtable.Table
 
-newtype RecordID = RecordID Text deriving (FromJSON, Show, Read, Eq, Generic, Ord)
-instance Hashable RecordID 
-
-rec2str :: RecordID -> String
-rec2str (RecordID rec) = T.unpack rec
-
-class IsRecord a where
-  toRec :: a -> RecordID
-
-instance IsRecord RecordID where
-  toRec = id
-
-instance IsRecord String where
-  toRec = RecordID . T.pack 
-
-data Table a = Table {
-    tableRecords :: Map.HashMap RecordID a
-  , tableOffset :: Maybe Text
-  } deriving (Show, Read)
-
-instance (FromJSON a) => FromJSON (Table a) where
-  parseJSON (Object v) = do
-    recs <- v .: "records" :: Parser [Value]
-    parsedRecs <- foldlM parseRec Map.empty recs
-    offset <- v .:? "offset"
-    return $ Table parsedRecs offset
-    where
-      parseRec tbl (Object v) = 
-            do  recId <- v .: "id"
-                obj <- v .: "fields" 
-                return $ Map.insert recId obj tbl
-        <|> error ("could not decode: " <> show v)
-
-instance Monoid (Table a) where
-  mempty = Table mempty Nothing
-  mappend (Table t1 o) (Table t2 _) = Table (mappend t1 t2) o
-
-toList :: Table a -> [(RecordID, a)]
-toList = Map.toList . tableRecords
-
-exists :: (IsRecord r) => Table a -> r -> Bool
-exists tbl rec = Map.member (toRec rec) (tableRecords tbl)
-
-select :: (HasCallStack, IsRecord r, Show a) => Table a -> r -> a
-select tbl rec = tableRecords tbl `lookup` toRec rec
-
-selectMaybe :: (IsRecord r, Show a) => Table a -> r -> Maybe a
-selectMaybe tbl rec = toRec rec `Map.lookup` tableRecords tbl 
-
-selectAll :: Table a -> [a]
-selectAll = map snd . toList
-
-selectAllKeys :: Table a -> [RecordID]
-selectAllKeys = map fst . toList
-
-selectWhere :: Table a -> (RecordID -> a -> Bool) -> [a]
-selectWhere tbl f = map snd $ filter (uncurry f) (toList tbl)
-
-selectKeyWhere :: Table a -> (RecordID -> a -> Bool) -> [RecordID]
-selectKeyWhere tbl f = map fst $ filter (uncurry f) (toList tbl)
-
-deleteWhere :: Table a -> (RecordID -> a -> Bool) -> Table a
-deleteWhere (Table recs off) f = Table (Map.filterWithKey (\k v -> not $ f k v) recs) off
 
 -- ID types
 
