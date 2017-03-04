@@ -279,3 +279,8 @@ newtype Prioritization = Prioritization {
 --   debug (thrTbl, priorities) = 
 --     prettyRows 20 $ for priorities $ \(Priority (ThreadID t) p) -> 
 --       [debug (select thrTbl t), show p]
+
+data BayesNet a = BayesNet 
+  { netVars :: HashMap a (TDV Bool)
+  , juncTree :: JunctionTree CPT
+  }

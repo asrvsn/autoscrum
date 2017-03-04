@@ -12,14 +12,16 @@ import System.Process (system)
 import Airtable.Table
 import Airtable.Query
 
+opts :: AirtableOptions
+opts = AirtableOptions { apiKey = api_key
+                       , appId = app_id
+                       , apiVersion = 0
+                       }
+                       
 main :: IO ()
 main = do
   putStrLn "\n===== ALPHASHEETS TASK SCHEDULER ====="
 
-  let opts = AirtableOptions { apiKey = api_key
-                             , appId = app_id
-                             , apiVersion = 0
-                             }
 
   cmdOptions [
       "first-time setup (run this if you haven't)"
