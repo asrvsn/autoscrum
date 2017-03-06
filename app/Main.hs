@@ -64,9 +64,26 @@ main = do
         putStrLn "\nComputing schedule using parameters:\n"
         putStrLn $ debug prms
         putStrLn "...\n"
-        let schedule = computeSchedule thrTbl blkTbl cntTbl devTbl tagTbl velTbl prms
-        putStrLn $ debug (devTbl, schedule)
-        persist "schedule" schedule
+
+        let bn = bayesNet thrTbl cntTbl 
+        schedules <- forM [1..n_schedule_samples] $ \i -> do
+          putStrLn $ "Sample " <> show i <> " ..."
+          thrTbl_ <- taskSample bn thrTbl
+          let (blkTbl_, cntTbl_) = reconcileWithThreads thrTbl_ blkTbl cntTbl 
+          return $ schedule bn thrTbl_ blkTb_ cntTbl_ devTbl tagTbl velTbl prms
+
+        let timedSchedules =  sortBy (compare `on` snd) $
+                                zip schedules (map getRuntime schedules)
+        let sched20 = timedSchedules !! (round $ n_schedule_samples * 0.2)
+        let sched50 = timedSchedules !! (round $ n_schedule_samples * 0.5)
+        let sched80 = timedSchedules !! (round $ n_schedule_samples * 0.8)
+
+        putStrLn "\nMedian schedule:"
+        putStrLn $ debug (devTbl, sched50)
+
+        persist "sched20" sched20
+        persist "sched50" sched50
+        persist "sched80" sched80
         putStrLn "\n...Done."
         
         persist "schedule_vis" (schedule2vis thrTbl devTbl schedule)

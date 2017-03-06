@@ -26,3 +26,6 @@ cache_ext = ".cache"
 
 url_ext :: String
 url_ext = ".url"
+
+n_schedule_samples :: Int
+n_schedule_samples = 30
