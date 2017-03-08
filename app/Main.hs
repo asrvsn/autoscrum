@@ -2,16 +2,25 @@
 
 module Main where
 
-import Lib
-import Types
-import Missing
 import Constants
+import AirtableComputation.Scheduler.Schedule 
+import AirtableIO.TasksBase
+import AirtableIO.DashboardUpdate
+import FileIO
+import Missing
 
 import System.Process (system)
 import Data.Time.Clock (getCurrentTime)
-
+import Data.Monoid
 import Airtable.Table
 import Airtable.Query
+import Text.Read (readMaybe)
+
+default_sched_params :: ScheduleParams
+default_sched_params = ScheduleParams {
+    w_completed = 1.0
+  , w_priority  = 1.0
+  }
 
 opts :: AirtableOptions
 opts = AirtableOptions { apiKey = api_key
@@ -52,11 +61,11 @@ main = do
         curTime <- getCurrentTime
 
         -- (1) upload diff in threads table
-        thrTbl_ <- retrieve "Threads_table_old"
+        thrTbl_ <- retrieveRemote "Threads_table_old"
         uploadTasksDiff curTime dashOpts thrTbl_ thrTbl devTbl
 
         -- (2) persist new threads table
-        persist "Threads_table_old" thrTbl
+        persistRemote "Threads_table_old" thrTbl
 
         -- (3) compute 20%, 50%, 80% schedules 
         prms <- ynCached "sched_params" $ 

@@ -1,9 +1,27 @@
+{-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE OverloadedStrings #-}
+
 module AirtableIO.DashboardUpdate 
   ( uploadTasksDiff
   , uploadEstimates
   , uploadGantt
   , uploadEstimateHistory
   ) where
+
+import           Data.Time.Clock (UTCTime)
+import           Data.Function (on)
+import           Data.List (sortBy)
+import           Data.Aeson
+import           Data.Foldable (forM_)
+import           Control.Monad (void)
+import           System.Process (system)
+import           Airtable.Table
+import           Airtable.Query
+
+import AirtableComputation.Scheduler.Schedule
+import AirtableIO.TasksBase
+import AirtableIO.DashboardBase
+import FileIO
 
 
 uploadTasksDiff :: UTCTime
@@ -12,56 +30,58 @@ uploadTasksDiff :: UTCTime
                 -> Table Thread
                 -> Table Developer
                 -> IO ()
-uploadTasksDiff opts thrTbl_ thrTbl devTbl = 
+uploadTasksDiff curTime opts thrTbl_ thrTbl devTbl = 
   forM_ payloads $ \payload -> 
     createRecord opts "Task status changes" payload
   where
-    CUDRecord cudRecord = tableCUDRecord (==) thrTbl_ thrTbl
-    payloads = for cudRecord $ \case
+    CUDHistory cudHistory = tableCUDHistory (==) thrTbl_ thrTbl
+    payloads = (flip map) cudHistory $ \case
       Created thr -> 
-        let asignee = vSelect devTbl <$> threadAsignee thr
+        let assignee = vSelect devTbl <$> threadAssignee thr
         in  object [ "Thread name" .= threadName thr
-                   , "Asignee" .= asignee
+                   , "Assignee" .= fmap devName assignee
                    , "Story pts" .= threadStoryPts thr
-                   , "Change" .= "Added"
+                   , "Change" .= ("Added" :: String)
                    , "Date recorded" .= curTime
                    ]
       Updated oldThr newThr -> 
         if (threadFinished oldThr == False) && (threadFinished newThr == True) 
           then 
-            let asignee = vSelect devTbl <$> threadName newThr
+            let assignee = vSelect devTbl <$> threadAssignee newThr
             in  object [ "Thread name" .= threadName newThr 
-                       , "Asignee" .= asignee
+                       , "Assignee" .= fmap devName assignee
                        , "Story pts" .= threadStoryPts newThr
-                       , "Change" .= "Done" 
+                       , "Change" .= ("Done" :: String) 
                        , "Date recorded" .= curTime
                        ]
           else 
-            let asignee = vSelect devTbl <$> threadName newThr
+            let assignee = vSelect devTbl <$> threadAssignee newThr
                 diff = object ["old" .= oldThr, "new" .= newThr]
             in  object [ "Thread name" .= threadName newThr
-                       , "Asignee" .= asignee
+                       , "Assignee" .= fmap devName assignee
                        , "Story pts" .= threadStoryPts newThr
-                       , "Change" .= "Updated"
+                       , "Change" .= ("Updated" :: String)
                        , "Date recorded" .= curTime
                        , "Diff" .= diff
                        ]
       Deleted thr -> 
         let assignee = vSelect devTbl <$> threadAssignee thr
         in  object [ "Thread name" .= threadName thr
-                   , "Asignee" .= asignee
+                   , "Assignee" .= fmap devName assignee
                    , "Story pts" .= threadStoryPts thr
-                   , "Change" .= "Deleted"
+                   , "Change" .= ("Deleted" :: String)
                    , "Date recorded" .= curTime
                    ]
 
 uploadEstimates :: UTCTime -> AirtableOptions -> ScheduleSummary -> IO ()
 uploadEstimates curTime opts summary = 
-  createRecord opts "Time estimations" $ 
-    toJSON $ TimeEstimation curTime
-                            getRuntime (sched20 summary)
-                            getRuntime (sched50 summary)
-                            getRuntime (sched80 summary) 
+  void $ createRecord opts "Time estimations" $ 
+    toJSON $ TimeEstimation 
+      { runDate = curTime
+      , est20 = getRuntime (sched20 summary)
+      , est50 = getRuntime (sched50 summary)
+      , est80 = getRuntime (sched80 summary) 
+      }
 
 uploadGantt :: UTCTime 
             -> AirtableOptions
@@ -73,21 +93,21 @@ uploadGantt curTime opts thrTbl devTbl sched = do
   persist "sched_vis" (schedule2vis thrTbl devTbl sched)
   system "python gantt.py sched_vis"
   ganttUrl <- readFile "sched_vis.url"
-  createRecord dashOpts "Plot links" $ 
+  void $ createRecord opts "Plot links" $ 
     object [ "Link" .= ganttUrl
-           , "Link type" .= "Median gantt chart"
+           , "Link type" .= ("Median gantt chart" :: String)
            , "Last updated" .= curTime
            ]
 
 uploadEstimateHistory :: UTCTime -> AirtableOptions -> IO ()
 uploadEstimateHistory curTime opts = do
-  timeEsts <- getRecords dashOpts "Time estimations"
-  persist "estimates_over_time" (map toPyTimeEst (sortByTime timeEsts))
+  timeEsts <- getRecords opts "Time estimations"
+  persist "estimates_over_time" (map toPyTimeEst (sortByTime $ vSelectAll timeEsts))
   system "python estimates.py estimates_over_time"
   estUrl <- readFile "estimates_over_time.url"
-  createRecord opts "Plot links" $ 
+  void $ createRecord opts "Plot links" $ 
     object [ "Link" .= estUrl
-           , "Link type" .= "Estimates over time"
+           , "Link type" .= ("Estimates over time" :: String)
            , "Last updated" .= curTime
            ]
   where

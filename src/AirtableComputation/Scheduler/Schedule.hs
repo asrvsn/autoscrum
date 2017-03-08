@@ -7,6 +7,7 @@ module AirtableComputation.Scheduler.Schedule
   -- * Scheduler types
     Schedule
   , ScheduleParams(..)
+  , ScheduleSummary(..)
   -- * Scheduler API
   , sampledScheduleSummary
   , schedule 
@@ -32,7 +33,8 @@ import           Data.Aeson
 import           Data.Maybe (isJust, catMaybes)
 import           Data.Foldable (find)
 import           Data.Function (on)
-import           Data.List (minimumBy)
+import           Data.List (minimumBy, sortBy)
+import           Data.Monoid
 import           Control.Monad.State
 import           Airtable.Table
 
@@ -87,19 +89,20 @@ sampledScheduleSummary :: Int
                        -> Table Velocity
                        -> IO ScheduleSummary
 sampledScheduleSummary nSamples prms thrTbl blkTbl cntTbl devTbl tagTbl velTbl = do
-  let bn = bayesNet thrTbl cntTbl 
+  let bn = tasksBayesNet thrTbl cntTbl 
   schedules <- forM [1..nSamples] $ \i -> do
     putStrLn $ "Sample " <> show i <> " ..."
     thrTbl_ <- sampleTable bn thrTbl
     let (blkTbl_, cntTbl_) = reconcileWithThreads thrTbl_ blkTbl cntTbl 
-    return $ schedule bn thrTbl_ blkTb_ cntTbl_ devTbl tagTbl velTbl prms
+    return $ schedule bn thrTbl_ blkTbl_ cntTbl_ devTbl tagTbl velTbl prms
 
   let timedSchedules =  sortBy (compare `on` snd) $
                           zip schedules (map getRuntime schedules)
+  let getConfidentSchedule c = fst $ timedSchedules !! (round $ fromIntegral nSamples * c)
   return ScheduleSummary 
-    { sched20 = timedSchedules !! (round $ n_schedule_samples * 0.2)
-    , sched50 = timedSchedules !! (round $ n_schedule_samples * 0.5)
-    , sched80 = timedSchedules !! (round $ n_schedule_samples * 0.8)
+    { sched20 = getConfidentSchedule 0.2
+    , sched50 = getConfidentSchedule 0.5
+    , sched80 = getConfidentSchedule 0.8
     }
 
 schedule :: BayesNet RecordID

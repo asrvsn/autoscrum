@@ -19,6 +19,7 @@ library
                        FileIO
                        Missing
                        AirtableIO.DashboardBase
+                       AirtableIO.DashboardUpdate
                        AirtableIO.TasksBase
                        AirtableComputation.Tasks
                        AirtableComputation.BayesNet
@@ -51,6 +52,7 @@ executable airtable-exe
                      , airtable
                      , process
                      , airtable-api
+                     , time
   default-language:    Haskell2010
 
 test-suite airtable-test

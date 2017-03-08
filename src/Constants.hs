@@ -14,12 +14,6 @@ dash_app_id = "app2PQQ9xjg5Mleq6"
 api_key :: String
 api_key = "keyDSaC5Xv0BoKTSD"
 
--- default_sched_params :: ScheduleParams
--- default_sched_params = ScheduleParams {
---     w_completed = 1.0
---   , w_priority  = 1.0
---   }
-
 cache_ext :: String
 cache_ext = ".cache"
 

@@ -25,20 +25,27 @@ data CUD a
   | Updated { old :: a, new :: a }
   | Deleted a
 
-tableCUDHistory :: (Record a -> Record a -> Bool) -> Table a -> Table a -> CUDHistory (Record a)
+tableCUDHistory :: (a -> a -> Bool) -> Table a -> Table a -> CUDHistory a
 tableCUDHistory cmp tbl_ tbl = 
   CUDHistory $ 
        map Created created
     ++ map (uncurry Updated) updated
     ++ map Deleted deleted
   where
-    created = Map.elems $ Map.difference (tableRecords tbl) (tableRecords tbl_) 
-    updCmb a a' = if cmp a a' then Just (a,a') else Nothing
+    created = 
+      map recordObj . Map.elems $ 
+        Map.difference (tableRecords tbl) (tableRecords tbl_) 
+    updCmb rec rec' = 
+      let obj  = recordObj rec
+          obj' = recordObj rec'
+      in if cmp obj obj' then Just (obj, obj') else Nothing
     updated = 
       catMaybes $ 
         Map.elems $ 
           Map.intersectionWith updCmb (tableRecords tbl_) (tableRecords tbl)
-    deleted = Map.elems $ Map.difference (tableRecords tbl_) (tableRecords tbl)
+    deleted = 
+      map recordObj . Map.elems $ 
+        Map.difference (tableRecords tbl_) (tableRecords tbl)
 
 -- * Time estimations
 

@@ -119,9 +119,10 @@ data Thread = Thread
   , threadStoryPts :: Double
   , threadAssignable :: Bool
   , threadFinished :: Bool
-  , threadAsignee :: Maybe RecordID
+  , threadAssignee :: Maybe RecordID
   } deriving ( Show
              , Read
+             , Eq
              )
 
 instance FromJSON Thread where 
@@ -133,10 +134,24 @@ instance FromJSON Thread where
            <*> v .:? "Story pts" .!= (-1) -- ^ TODO(anand) what should this default be 
            <*> (boolField <$> v .: "Assignable?")
            <*> (boolField <$> v .: "Done?")
-           <*> v .:? "Asignee"
+           <*> v .:? "Assignee"
     where
       boolField :: Double -> Bool
       boolField n = n == fromInteger 1
+
+instance ToJSON Thread where
+  toJSON thr = object [ "Thread name" .= threadName thr
+                      , "Tags" .= threadTags thr
+                      , "Contained in" .= threadContainments thr
+                      , "Blocks" .= threadBlocks thr
+                      , "Story pts" .= threadStoryPts thr
+                      , "Assignable?" .= boolField (threadAssignable thr)
+                      , "Done?" .= boolField (threadFinished thr)
+                      , "Assignee" .= threadAssignee thr
+                      ]
+    where
+      boolField :: Bool -> Double
+      boolField b = if b then 1 else 0
 
 instance Debug Thread where 
   debug = show . threadName
@@ -196,6 +211,7 @@ instance FromJSON Velocity where
 
 newtype DevName = 
   DevName Text deriving ( FromJSON
+                        , ToJSON
                         , Show
                         , Read
                         , Eq

@@ -2,7 +2,9 @@ module FileIO
   ( 
   -- * File I/O
     persist
+  , persistRemote
   , retrieve
+  , retrieveRemote
   -- * Stdin I/O
   , yn
   , ynCached
@@ -18,15 +20,21 @@ import           Data.Monoid
 import           Data.List (find)
 import           Text.Read (readMaybe)
 
-import Types
+import Constants
 
 -- * File I/O
 
 persist :: (Show a) => String -> a -> IO ()
-persist fname a = writeFile (fname <> ".cache") (show a)
+persist fname a = writeFile (fname <> cache_ext) (show a)
+
+persistRemote :: (Show a) => String -> a -> IO ()
+persistRemote fname a = undefined
 
 retrieve :: (Read a) => String -> IO a
-retrieve fname = read <$> readFile (fname <> ".cache")
+retrieve fname = read <$> readFile (fname <> cache_ext)
+
+retrieveRemote :: (Read a) => String -> IO a
+retrieveRemote fname = undefined
 
 -- * Stdin I/O
 
@@ -43,7 +51,7 @@ yn ask y n = do
 
 ynCached :: (Show a, Read a) => String -> IO a -> IO a
 ynCached fname n = do
-  b <- doesFileExist (fname <> ".cache")
+  b <- doesFileExist (fname <> cache_ext)
   if b 
     then yn ("Use cached " <> fname <> "?") (retrieve fname) n
     else do
