@@ -1,15 +1,26 @@
-module IO 
-  ( persist
+module FileIO 
+  ( 
+  -- * File I/O
+    persist
   , retrieve
+  -- * Stdin I/O
   , yn
   , ynCached
   , cmdOptions
-  , enterParameters
   , mightNeedSudo
-  , unfairCoin
   ) where
 
--- API methods
+    
+import           System.Exit (ExitCode(..))
+import           System.Process (system)
+import           System.Directory (doesFileExist)
+import           Data.Monoid
+import           Data.List (find)
+import           Text.Read (readMaybe)
+
+import Types
+
+-- * File I/O
 
 persist :: (Show a) => String -> a -> IO ()
 persist fname a = writeFile (fname <> ".cache") (show a)
@@ -17,7 +28,7 @@ persist fname a = writeFile (fname <> ".cache") (show a)
 retrieve :: (Read a) => String -> IO a
 retrieve fname = read <$> readFile (fname <> ".cache")
 
--- CMDline methods
+-- * Stdin I/O
 
 yn :: String -> IO a -> IO a -> IO a
 yn ask y n = do
@@ -63,18 +74,6 @@ cmdOptions opts f = do
                   "exit" -> return ()
                   _ -> f resp >> cmdOptions opts f
 
-enterParameters :: IO ScheduleParams 
-enterParameters = 
-  ScheduleParams <$> reqDouble "w_completed"
-                 <*> reqDouble "w_priority"
-  where
-    reqDouble s = do
-      putStrLn $ "Enter " <> s
-      resp <- getLine
-      case readMaybe resp :: Maybe Double of 
-        Just d -> return d
-        Nothing -> reqDouble s
-
 mightNeedSudo :: String -> IO ExitCode
 mightNeedSudo cmd = do
   e <- system cmd
@@ -84,9 +83,3 @@ mightNeedSudo cmd = do
       system $ "sudo " <> cmd
     _ -> return e
 
--- misc
-
-unfairCoin :: Double -> IO Bool
-unfairCoin p = flip <$> getStdRandom (randomR (1,100))
-  where
-    flip r = r < (p * 100) 

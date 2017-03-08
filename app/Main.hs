@@ -52,49 +52,8 @@ main = do
         curTime <- getCurrentTime
 
         -- (1) upload diff in threads table
-        thrTbl' <- retrieve "Threads_table_old"
-        let CUDRecord cudRecord = tableCUDRecord (==) thrTbl' thrTbl
-        forM_ cudRecord $ \case
-          Created thr -> do
-            let asignee = select devTbl <$> threadAsignee thr
-            createRecord dashOpts "Task status changes" $ 
-              object [ "Thread name" .= threadName thr
-                     , "Asignee" .= asignee
-                     , "Story pts" .= threadStoryPts thr
-                     , "Change" .= "Added"
-                     , "Date recorded" .= curTime
-                     ]
-          Updated oldThr newThr -> 
-            if (threadFinished oldThr == False) && (threadFinished newThr == True) 
-              then do
-                let asignee = select devTbl <$> threadName newThr
-                createRecord dashOpts "Task status changes" $ 
-                  object [ "Thread name" .= threadName newThr 
-                         , "Asignee" .= asignee
-                         , "Story pts" .= threadStoryPts newThr
-                         , "Change" .= "Done" 
-                         , "Date recorded" .= curTime
-                         ]
-              else do
-                let asignee = select devTbl <$> threadName newThr
-                let diff = object ["old" .= oldThr, "new" .= newThr]
-                createRecord dashOpts "Tasks status changes" $
-                  object [ "Thread name" .= threadName newThr
-                         , "Asignee" .= asignee
-                         , "Story pts" .= threadStoryPts newThr
-                         , "Change" .= "Updated"
-                         , "Date recorded" .= curTime
-                         , "Diff" .= diff
-                         ]
-          Deleted thr -> do
-            let assignee = select devTbl <$> threadAssignee thr
-            createRecord dashOpts "Task status changes" $ 
-              object [ "Thread name" .= threadName thr
-                     , "Asignee" .= asignee
-                     , "Story pts" .= threadStoryPts thr
-                     , "Change" .= "Deleted"
-                     , "Date recorded" .= curTime
-                     ]
+        thrTbl_ <- retrieve "Threads_table_old"
+        uploadTasksDiff curTime dashOpts thrTbl_ thrTbl devTbl
 
         -- (2) persist new threads table
         persist "Threads_table_old" thrTbl
@@ -109,49 +68,19 @@ main = do
         putStrLn $ debug prms
         putStrLn "...\n"
 
-        let bn = bayesNet thrTbl cntTbl 
-        schedules <- forM [1..n_schedule_samples] $ \i -> do
-          putStrLn $ "Sample " <> show i <> " ..."
-          thrTbl_ <- taskSample bn thrTbl
-          let (blkTbl_, cntTbl_) = reconcileWithThreads thrTbl_ blkTbl cntTbl 
-          return $ schedule bn thrTbl_ blkTb_ cntTbl_ devTbl tagTbl velTbl prms
-
-        let timedSchedules =  sortBy (compare `on` snd) $
-                                zip schedules (map getRuntime schedules)
-        let sched20 = timedSchedules !! (round $ n_schedule_samples * 0.2)
-        let sched50 = timedSchedules !! (round $ n_schedule_samples * 0.5)
-        let sched80 = timedSchedules !! (round $ n_schedule_samples * 0.8)
+        schedSummary <- sampledScheduleSummary n_schedule_samples prms thrTbl blkTbl cntTbl devTbl tagTbl velTbl 
 
         putStrLn "\nMedian schedule:"
-        putStrLn $ debug (devTbl, sched50)
+        putStrLn $ debug (devTbl, sched50 schedSummary)
 
         -- (4) upload estimates
-        createRecord dashOpts "Time estimations" $ 
-          toJSON $ TimeEstimation curTime
-                                  getRuntime sched20
-                                  getRuntime sched50
-                                  getRuntime sched80
+        uploadEstimates curTime dashOpts schedSummary
 
         -- (5) upload gantt chart
-        persist "sched50_vis" (schedule2vis thrTbl devTbl sched50)
-        system "python gantt.py sched50_vis"
-        ganttUrl <- readFile "sched50_vis.url"
-        createRecord dashOpts "Plot links" $ 
-          object [ "Link" .= ganttUrl
-                 , "Link type" .= "Median gantt chart"
-                 ]
+        uploadGantt curTime dashOpts thrTbl devTbl (sched50 schedSummary)
 
         -- (6) upload estimates over time chart
-        timeEsts <- getRecords dashOpts "Time estimations"
-        let sortedTimeEsts = sortBy (compare `on` runDate) timeEsts
-        let toPyTimeEst est = [est20 est, est50 est, est80 est]
-        persist "estimates_over_time" (map toPyTimeEst sortedTimeEsts)
-        system "python estimates.py estimates_over_time"
-        estUrl <- readFile "estimates_over_time.url"
-        createRecord dashOpts "Plot links" $ 
-          object [ "Link" .= estUrl
-                 , "Link type" .= "Estimates over time"
-                 ]
+        uploadEstimateHistory curTime dashOpts
 
       "lookup record" -> do
         cmdOptions [
@@ -194,3 +123,15 @@ main = do
               putStrLn . show $ selectMaybe velTbl resp
 
   putStrLn "===== EXITED ====="
+
+enterParameters :: IO ScheduleParams 
+enterParameters = 
+  ScheduleParams <$> reqDouble "w_completed"
+                 <*> reqDouble "w_priority"
+  where
+    reqDouble s = do
+      putStrLn $ "Enter " <> s
+      resp <- getLine
+      case readMaybe resp :: Maybe Double of 
+        Just d -> return d
+        Nothing -> reqDouble s

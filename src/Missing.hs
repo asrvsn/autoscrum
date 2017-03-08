@@ -1,7 +1,19 @@
 {-# LANGUAGE BangPatterns #-}
+{-# LANGUAGE NoImplicitPrelude #-}
 
-module Missing where
+module Missing 
+  ( mean
+  , stddev
+  , var
+  , l2_norm
+  , standardize
+  , trace'
+  , lookup
+  , Debug(..)
+  , prettyRows
+  ) where
 
+import           Prelude hiding (lookup)
 import           GHC.Stack
 import           Debug.Trace
 import           Data.HashMap.Strict (HashMap)
