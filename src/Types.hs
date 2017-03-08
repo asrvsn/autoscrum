@@ -72,17 +72,19 @@ data Thread = Thread {
   , threadStoryPts :: Double
   , threadAssignable :: Bool
   , threadFinished :: Bool
+  , threadAsignee :: Maybe RecordID
   } deriving (Show, Read)
 
 instance FromJSON Thread where 
-  parseJSON (Object v) = 
+  parseJSON = withObject "thread" $ \v ->
     Thread <$> v .: "Thread name"
            <*> v .:? "Tags" .!= []
            <*> v .:? "Contained in" .!= []
            <*> v .:? "Blocks" .!= []
-           <*> v .:? "Story pts" .!= 42 -- what the hell should this default be 
+           <*> v .:? "Story pts" .!= -1 -- what the hell should this default be 
            <*> (boolField <$> v .: "Assignable?")
            <*> (boolField <$> v .: "Done?")
+           <*> v .:? "Asignee"
     where
       boolField :: Double -> Bool
       boolField n = n == fromInteger 1
@@ -284,3 +286,47 @@ data BayesNet a = BayesNet
   { netVars :: HashMap a (TDV Bool)
   , juncTree :: JunctionTree CPT
   }
+
+newtype CUDRecord a = CUDRecord [CUD a]
+
+data CUD a 
+  = Created a
+  | Updated { old :: a, new :: a }
+  | Deleted a
+
+tableCUDRecord :: (a -> a -> Bool) -> Table a -> Table a -> CUDRecord a
+tableCUDRecord cmp tbl_ tbl = 
+  CUDRecord $ 
+       map Created created
+    ++ map (uncurry Updated) updated
+    ++ map Deleted deleted
+  where
+    created = Map.elems $ Map.difference (tableRecords tbl) (tableRecords tbl_) 
+    updCmb a a' = if cmp a a' then Just (a,a') else Nothing
+    updated = 
+      catMaybes $ 
+        Map.elems $ 
+          Map.intersectionWith updCmb (tableRecords tbl_) (tableRecords tbl)
+    deleted = Map.elems $ Map.difference (tableRecords tbl_) (tableRecords tbl)
+
+data TimeEstimation = TimeEstimation
+  { runDate :: UTCTime
+  , est20 :: Double
+  , est50 :: Double
+  , est80 :: Double
+  }
+
+instance FromJSON TimeEstimation where
+  parseJSON = withObject "time estimation" $ \v ->
+    TimeEstimation <$> v .: "Run date"
+                   <*> v .: "20% estimate"
+                   <*> v .: "50% estimate"
+                   <*> v .: "80% estimate" 
+
+instance ToJSON TimeEstimation where
+  toJSON tEst = 
+    object [ "Run date" .= runDate tEst
+           , "20% estimate" .= est20 tEst
+           , "50% estimate" .= est50 tEst
+           , "80% estimate" .= est80 tEst
+           ] 

@@ -9,7 +9,7 @@ packages:
 - '.'
 - location:
     git: https://github.com/ooblahman/airtable-api.git
-    commit: 134bcc9272d1c3e8256b11f1f40d8645c2e18454
+    commit: HEAD
   extra-dep: true
 # Packages to be pulled from upstream that are not in the resolver (e.g., acme-missiles-0.3)
 extra-deps: []

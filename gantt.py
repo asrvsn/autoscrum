@@ -2,12 +2,15 @@ import plotly.plotly as py
 import plotly.graph_objs as go
 
 import json
+import sys
 
 from shortid import ShortId
 
 idgen = ShortId()
 
-with open("schedule_vis.cache", 'r') as f_vis: 
+f_vis_name = sys.argv[1]
+
+with open(f_vis_name + ".cache", 'r') as f_vis: 
     vis = json.loads(f_vis.read())
 
     traces = []
@@ -50,5 +53,5 @@ with open("schedule_vis.cache", 'r') as f_vis:
     fig = go.Figure(data=traces, layout=layout)
     url = py.plot(fig, filename='marker-h-bar', auto_open=False)
 
-    with open("schedule_vis.url", 'w') as f_url:
+    with open(f_vis_name + ".url", 'w') as f_url:
         f_url.write(url)        

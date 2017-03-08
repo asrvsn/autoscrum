@@ -1,9 +1,6 @@
 module IO 
   ( persist
   , retrieve
-  , visualizeSchedule
-  , uploadPrioritization
-  , uploadSchedule
   , yn
   , ynCached
   , cmdOptions
@@ -20,27 +17,7 @@ persist fname a = writeFile (fname <> ".cache") (show a)
 retrieve :: (Read a) => String -> IO a
 retrieve fname = read <$> readFile (fname <> ".cache")
 
-visualizeSchedule :: IO () 
-visualizeSchedule = do
-  b <- doesFileExist "schedule_vis.cache"
-  if b 
-    then do
-      system "python visualize.py"
-      url <- readFile "schedule_vis.url"
-      system $ "google-chrome " <> url
-      return ()
-    else 
-      putStrLn "Error: you need to run \"schedule\" first."
-
-uploadPrioritization :: Prioritization -> IO ()
-uploadPrioritization = undefined
-
-uploadSchedule :: Schedule -> IO ()
-uploadSchedule = undefined
-
--- CMDline metehods
-
--- General methods
+-- CMDline methods
 
 yn :: String -> IO a -> IO a -> IO a
 yn ask y n = do

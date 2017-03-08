@@ -9,6 +9,9 @@ import Data.ByteString (ByteString)
 app_id :: String
 app_id = "appfGT5ACymqznlOP"
 
+dash_app_id :: String
+dash_app_id = "app2PQQ9xjg5Mleq6"
+
 api_key :: String
 api_key = "keyDSaC5Xv0BoKTSD"
 
