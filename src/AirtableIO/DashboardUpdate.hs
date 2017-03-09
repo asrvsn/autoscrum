@@ -112,4 +112,4 @@ uploadEstimateHistory curTime opts = do
            ]
   where
     sortByTime = sortBy (compare `on` runDate)
-    toPyTimeEst est = [est20 est, est50 est, est80 est]
+    toPyTimeEst est = (runDate est, est20 est, est50 est, est80 est)

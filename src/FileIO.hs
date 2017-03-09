@@ -28,13 +28,13 @@ persist :: (Show a) => String -> a -> IO ()
 persist fname a = writeFile (fname <> cache_ext) (show a)
 
 persistRemote :: (Show a) => String -> a -> IO ()
-persistRemote fname a = undefined
+persistRemote = persist -- TODO
 
 retrieve :: (Read a) => String -> IO a
 retrieve fname = read <$> readFile (fname <> cache_ext)
 
 retrieveRemote :: (Read a) => String -> IO a
-retrieveRemote fname = undefined
+retrieveRemote = retrieve -- TODO
 
 -- * Stdin I/O
 
