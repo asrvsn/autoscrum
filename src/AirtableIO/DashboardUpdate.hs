@@ -13,6 +13,7 @@ import           Data.Function (on)
 import           Data.List (sortBy)
 import           Data.Aeson
 import           Data.Foldable (forM_)
+import qualified Data.ByteString.Lazy.Char8 as BLC
 import           Control.Monad (void)
 import           System.Process (system)
 import           Airtable.Table
@@ -31,8 +32,11 @@ uploadTasksDiff :: UTCTime
                 -> Table Developer
                 -> IO ()
 uploadTasksDiff curTime opts thrTbl_ thrTbl devTbl = 
-  forM_ payloads $ \payload -> 
-    createRecord opts "Task status changes" payload
+  case cudHistory of 
+    [] -> putStrLn "Change history is empty. Not uploading anything."
+    _  -> 
+      forM_ payloads $ \payload -> 
+        createRecord opts "Task status changes" payload
   where
     CUDHistory cudHistory = tableCUDHistory (==) thrTbl_ thrTbl
     payloads = (flip map) cudHistory $ \case
@@ -41,7 +45,7 @@ uploadTasksDiff curTime opts thrTbl_ thrTbl devTbl =
         in  object [ "Thread name" .= threadName thr
                    , "Assignee" .= fmap devName assignee
                    , "Story pts" .= threadStoryPts thr
-                   , "Change" .= ("Added" :: String)
+                   , "Change" .= [String "Added"] 
                    , "Date recorded" .= curTime
                    ]
       Updated oldThr newThr -> 
@@ -51,16 +55,16 @@ uploadTasksDiff curTime opts thrTbl_ thrTbl devTbl =
             in  object [ "Thread name" .= threadName newThr 
                        , "Assignee" .= fmap devName assignee
                        , "Story pts" .= threadStoryPts newThr
-                       , "Change" .= ("Done" :: String) 
+                       , "Change" .= [String "Done"]  
                        , "Date recorded" .= curTime
                        ]
           else 
             let assignee = vSelect devTbl <$> threadAssignee newThr
-                diff = object ["old" .= oldThr, "new" .= newThr]
+                diff = BLC.unpack . encode $ object ["old" .= oldThr, "new" .= newThr]
             in  object [ "Thread name" .= threadName newThr
                        , "Assignee" .= fmap devName assignee
                        , "Story pts" .= threadStoryPts newThr
-                       , "Change" .= ("Updated" :: String)
+                       , "Change" .= [String "Updated"] 
                        , "Date recorded" .= curTime
                        , "Diff" .= diff
                        ]
@@ -69,7 +73,7 @@ uploadTasksDiff curTime opts thrTbl_ thrTbl devTbl =
         in  object [ "Thread name" .= threadName thr
                    , "Assignee" .= fmap devName assignee
                    , "Story pts" .= threadStoryPts thr
-                   , "Change" .= ("Deleted" :: String)
+                   , "Change" .= [String "Deleted"] 
                    , "Date recorded" .= curTime
                    ]
 

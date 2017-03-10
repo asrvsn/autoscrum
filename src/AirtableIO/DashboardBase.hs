@@ -38,7 +38,7 @@ tableCUDHistory cmp tbl_ tbl =
     updCmb rec rec' = 
       let obj  = recordObj rec
           obj' = recordObj rec'
-      in if cmp obj obj' then Just (obj, obj') else Nothing
+      in if cmp obj obj' then Nothing else Just (obj, obj')
     updated = 
       catMaybes $ 
         Map.elems $ 

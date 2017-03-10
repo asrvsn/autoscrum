@@ -17,24 +17,37 @@ import           System.Exit (ExitCode(..))
 import           System.Process (system)
 import           System.Directory (doesFileExist)
 import           Data.Monoid
+import           Data.Aeson
 import           Data.List (find)
+import qualified Data.ByteString.Lazy as BL
 import           Text.Read (readMaybe)
 
 import Constants
 
 -- * File I/O
 
-persist :: (Show a) => String -> a -> IO ()
-persist fname a = writeFile (fname <> cache_ext) (show a)
+persist :: (ToJSON a) => String -> a -> IO ()
+persist fname a = BL.writeFile (fname <> cache_ext) (encode a)
 
-persistRemote :: (Show a) => String -> a -> IO ()
+persistRemote :: (ToJSON a) => String -> a -> IO ()
 persistRemote = persist -- TODO
 
-retrieve :: (Read a) => String -> IO a
-retrieve fname = read <$> readFile (fname <> cache_ext)
+retrieve :: (FromJSON a) => String -> IO (Either String a)
+retrieve fname = do
+  let f = fname <> cache_ext
+  b <- doesFileExist f
+  if b 
+    then do
+      cont <- BL.readFile (fname <> cache_ext)
+      return $ case eitherDecode cont of 
+        Left e -> 
+          Left $ "Could not decode file {" <> fname <> "} due to error {" <> e <> "}"
+        Right r -> Right r
+    else return $ 
+      Left $ "Could not find file {" <> fname <> "}"
 
-retrieveRemote :: (Read a) => String -> IO a
-retrieveRemote = retrieve -- TODO
+retrieveRemote :: (FromJSON a) => String -> IO (Either String a)
+retrieveRemote = retrieve -- TODO(anand)
 
 -- * Stdin I/O
 
@@ -49,15 +62,17 @@ yn ask y n = do
     "N" -> n
     _   -> yn ask y n
 
-ynCached :: (Show a, Read a) => String -> IO a -> IO a
+ynCached :: (ToJSON a, FromJSON a) => String -> IO a -> IO a
 ynCached fname n = do
-  b <- doesFileExist (fname <> cache_ext)
-  if b 
-    then yn ("Use cached " <> fname <> "?") (retrieve fname) n
-    else do
+  f <- retrieve fname
+  case f of 
+    Left e -> do 
+      putStrLn e 
       a <- n
       persist fname a
       return a
+    Right r -> 
+      yn ("Use cached " <> fname <> "?") (return r) n
 
 cmdOptions :: [String] -> (String -> IO ()) -> IO ()
 cmdOptions opts f = do

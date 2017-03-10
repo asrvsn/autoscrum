@@ -4,6 +4,7 @@ module Main where
 
 import Constants
 import AirtableComputation.Scheduler.Schedule 
+import AirtableComputation.Tasks
 import AirtableIO.TasksBase
 import AirtableIO.DashboardUpdate
 import FileIO
@@ -49,25 +50,51 @@ main = do
         return ()
 
       "update dashboard" -> do
-        -- (-1) get all relevant tables
+        -- (-2) get all relevant tables
+        putStrLn "(-1) Getting all tables"
         thrTbl <- getRecords opts "Threads"
+        putStrLn "Got Threads"
         blkTbl <- getRecords opts "Blocks" 
+        putStrLn "Got Blocks"
         devTbl <- getRecords opts "Developers" 
+        putStrLn "Got Developers"
         cntTbl <- getRecords opts "Containments" 
-        tagTbl <- getRecords opts "Task Types" 
+        putStrLn "Got Containments"
+        tagTbl <- getRecords opts "Task types" 
+        putStrLn "Got Tasks Types"
         velTbl <- getRecords opts "Velocities" 
+        putStrLn "Got Velocities"
+
+        -- (-1) data validation
+        putStrLn "Check that for every thread there exists a developer with non-infinite completion time."
+        case getImpossibleThreads thrTbl velTbl tagTbl devTbl of
+          [] -> pure ()
+          xs -> do
+            putStrLn "The following have impossible tag configurations:"
+            let thrNames = map (threadName . vSelect thrTbl) xs
+            mapM_ (putStrLn . show) thrNames
+            abort
 
         -- (0) get current time
+        putStrLn "(0) get current time"
         curTime <- getCurrentTime
 
         -- (1) upload diff in threads table
-        thrTbl_ <- retrieveRemote "Threads_table_old"
-        uploadTasksDiff curTime dashOpts thrTbl_ thrTbl devTbl
+        putStrLn "(1) upload diff in threads table"
+        oldThrTbl <- retrieveRemote "Threads_table_old" 
+        case oldThrTbl of
+          Left l -> do
+            putStrLn l
+            putStrLn "Not uploading task status changes."
+          Right r -> 
+            uploadTasksDiff curTime dashOpts r thrTbl devTbl
 
         -- (2) persist new threads table
+        putStrLn "(2) persist new threads table"
         persistRemote "Threads_table_old" thrTbl
 
         -- (3) compute 20%, 50%, 80% schedules 
+        putStrLn "(3) compute 20%, 50%, 80% schedules"
         prms <- ynCached "sched_params" $ 
           yn  "use default parameters?" 
               (return default_sched_params) 
@@ -83,12 +110,15 @@ main = do
         putStrLn $ debug (devTbl, sched50 schedSummary)
 
         -- (4) upload estimates
+        putStrLn "(4) upload estimates"
         uploadEstimates curTime dashOpts schedSummary
 
         -- (5) upload gantt chart
+        putStrLn "(5) upload gantt chart"
         uploadGantt curTime dashOpts thrTbl devTbl (sched50 schedSummary)
 
         -- (6) upload estimates over time chart
+        putStrLn "(6) upload estimates over time chart"
         uploadEstimateHistory curTime dashOpts
 
       "lookup record" -> do
@@ -144,3 +174,6 @@ enterParameters =
       case readMaybe resp :: Maybe Double of 
         Just d -> return d
         Nothing -> reqDouble s
+
+abort :: a
+abort = error "===== ABORTED ======="

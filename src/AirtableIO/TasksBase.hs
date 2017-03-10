@@ -127,17 +127,20 @@ data Thread = Thread
 
 instance FromJSON Thread where 
   parseJSON = withObject "thread" $ \v ->
-    Thread <$> v .: "Thread name"
+    Thread <$> v .:? "Thread name" .!= ThreadName ""
            <*> v .:? "Tags" .!= []
            <*> v .:? "Contained in" .!= []
            <*> v .:? "Blocks" .!= []
            <*> v .:? "Story pts" .!= (-1) -- ^ TODO(anand) what should this default be 
            <*> (boolField <$> v .: "Assignable?")
            <*> (boolField <$> v .: "Done?")
-           <*> v .:? "Assignee"
+           <*> (headMay <$> v .:? "Assignee" .!= [])
     where
       boolField :: Double -> Bool
       boolField n = n == fromInteger 1
+      headMay :: [a] -> Maybe a
+      headMay []     = Nothing
+      headMay (x:xs) = Just x
 
 instance ToJSON Thread where
   toJSON thr = object [ "Thread name" .= threadName thr
@@ -147,7 +150,7 @@ instance ToJSON Thread where
                       , "Story pts" .= threadStoryPts thr
                       , "Assignable?" .= boolField (threadAssignable thr)
                       , "Done?" .= boolField (threadFinished thr)
-                      , "Assignee" .= threadAssignee thr
+                      , "Assignee" .= maybe [] (\a -> [a]) (threadAssignee thr)
                       ]
     where
       boolField :: Bool -> Double
@@ -168,10 +171,14 @@ data Containment = Containment
 
 instance FromJSON Containment where
   parseJSON = withObject "containment" $ \v -> do
-    [parent] <- v .: "Thread"
-    [child] <- v .: "Subthread"
+    parent <- listField "no parent" <$> v .: "Thread"
+    child <- listField "no child" <$> v .: "Subthread"
     prob <- v .: "Effective P(needed)"
     return $ Containment parent child (prob / 100)
+    where
+      listField err xs = case xs of 
+        [x] -> x
+        _ -> error err
 
 -- * Blocks
 

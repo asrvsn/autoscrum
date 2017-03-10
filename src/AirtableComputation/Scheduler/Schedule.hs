@@ -1,6 +1,7 @@
 {-# LANGUAGE NoImplicitPrelude #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE DeriveGeneric #-}
+{-# LANGUAGE BangPatterns #-}
 
 module AirtableComputation.Scheduler.Schedule 
   ( 
@@ -63,7 +64,9 @@ instance Debug (Table Developer, Schedule) where
 data ScheduleParams = ScheduleParams { 
     w_completed :: Double
   , w_priority :: Double
-  } deriving (Read, Show)
+  } deriving (Read, Show, Generic)
+instance ToJSON ScheduleParams
+instance FromJSON ScheduleParams
 
 instance Debug ScheduleParams where
   debug prms = prettyRows 20 [
@@ -79,7 +82,8 @@ data ScheduleSummary = ScheduleSummary
 
 -- * Scheduler API
 
-sampledScheduleSummary :: Int
+sampledScheduleSummary :: HasCallStack
+                       => Int
                        -> ScheduleParams
                        -> Table Thread
                        -> Table Block
@@ -94,7 +98,9 @@ sampledScheduleSummary nSamples prms thrTbl blkTbl cntTbl devTbl tagTbl velTbl =
     putStrLn $ "Sample " <> show i <> " ..."
     thrTbl_ <- sampleTable bn thrTbl
     let (blkTbl_, cntTbl_) = reconcileWithThreads thrTbl_ blkTbl cntTbl 
-    return $ schedule bn thrTbl_ blkTbl_ cntTbl_ devTbl tagTbl velTbl prms
+    let sched = schedule bn thrTbl_ blkTbl_ cntTbl_ devTbl tagTbl velTbl prms
+    putStrLn $ "est. runtime: " <> show (getRuntime sched)
+    return $! sched 
 
   let timedSchedules =  sortBy (compare `on` snd) $
                           zip schedules (map getRuntime schedules)
@@ -105,7 +111,8 @@ sampledScheduleSummary nSamples prms thrTbl blkTbl cntTbl devTbl tagTbl velTbl =
     , sched80 = getConfidentSchedule 0.8
     }
 
-schedule :: BayesNet RecordID
+schedule :: HasCallStack 
+        => BayesNet RecordID
         -> Table Thread
         -> Table Block
         -> Table Containment
@@ -124,13 +131,15 @@ schedule bn thrTbl blkTbl cntTbl devTbl tagTbl velTbl prms =
     prioritization = prioritize bn thrTbl blkTbl cntTbl
     
 
-    flushTasks :: State Schedule ()
+    flushTasks :: HasCallStack => State Schedule ()
     flushTasks = do
       ts <- getUnblockedTasks
       case ts of 
         [] -> return ()
         _  -> do
-          let possibleAssignments = [(t, DevID d) | t <- ts, d <- devs]
+          let possibleAssignments = case [(t, DevID d) | t <- ts, d <- devs] of 
+                                      [] -> error "flushTasks: got empty possibleAssignments"
+                                      xs -> xs
           features <- mapM (uncurry assignmentFeatures) possibleAssignments
           let losses = map (loss prms) (rescaleFeatures features)
           let ((t, d), _) = minimumBy (compare `on` snd) (zip possibleAssignments losses)
@@ -166,7 +175,9 @@ schedule bn thrTbl blkTbl cntTbl devTbl tagTbl velTbl prms =
 
     assign :: ThreadID -> DevID -> State Schedule ()
     assign thrId devId = do
-      let dt_task = taskCompletionTime tagTbl thrTbl devTbl velTbl thrId devId
+      let dt_task_ = taskCompletionTime tagTbl thrTbl devTbl velTbl thrId devId
+        -- TODO(anand) deal with negative completion times (bad data) better.
+          dt_task = if dt_task_ > 0 then dt_task_ else 1
       t_task <- getTaskAvailability thrId
       t_dev  <- getDevAvailability devId
       let elapsed = if t_task > t_dev 
@@ -181,13 +192,13 @@ schedule bn thrTbl blkTbl cntTbl devTbl tagTbl velTbl prms =
       blkTimes <- mapM getCompletedTaskTime blkThrs
       return $ case blkTimes of 
         [] -> 0
-        _  -> assertPositive $ maximum blkTimes
+        _  -> assertPositive "blkTimes" blkTimes $ maximum blkTimes
 
     getDevAvailability :: HasCallStack => DevID -> State Schedule Double
     getDevAvailability devId = gets $ \mp -> 
       case mp `lookup` devId of
         []   -> 0
-        t:ts -> assertPositive $ fst t 
+        t:ts -> assertPositive "devAvailability" mp $ fst t 
 
     getCompletedTaskTime :: ThreadID -> State Schedule Double
     getCompletedTaskTime thrId = gets $ \mp -> 
@@ -197,8 +208,11 @@ schedule bn thrTbl blkTbl cntTbl devTbl tagTbl velTbl prms =
                                   Nothing -> rec rest
       in rec (Map.elems mp) 
 
-    assertPositive :: HasCallStack => Double -> Double
-    assertPositive i = if i > 0 then i else error "assertPositive failed"
+    assertPositive :: (HasCallStack, Show a) => String -> a -> Double -> Double
+    assertPositive tag a i = 
+      if i > 0 
+        then i 
+        else error $ "assertPositive failed for {" <> tag <> "}: \n" <> show a
 
 -- helpers 
 
@@ -214,17 +228,17 @@ loss p f =
     f' = (f + fromInteger 1) ** fromInteger 2 -- recenter and square
 
 -- rescale features to [0,1] U {-Infinity, Infinity}
-rescaleFeatures :: [Features] -> [Features]
+rescaleFeatures :: HasCallStack => [Features] -> [Features]
 rescaleFeatures fs = map (f_unop fromNaN . (\x -> (x - x_min) / (x_max - x_min))) fs
   where
     fromNaN a = if isNaN a then 0 else a
-    x_min = f_nop (minimum . filter (not . isInfinite)) fs
-    x_max = f_nop (maximum . filter (not . isInfinite)) fs
+    x_min = f_nop (minimumOr (error "infinite runtime") . filter (not . isInfinite)) fs
+    x_max = f_nop (maximumOr (error "infinite runtime") . filter (not . isInfinite)) fs
 
 -- * Schedule accessors
 
-getRuntime :: Schedule -> Double
-getRuntime = maximum . map (head . map fst) . Map.elems
+getRuntime :: HasCallStack => Schedule -> Double
+getRuntime = maximumOr (error "schedule is empty") . map (head . map fst) . Map.elems
 
 getWorkingTime :: Schedule -> DevID -> Double
 getWorkingTime mp devId = 

@@ -4,8 +4,9 @@ module AirtableComputation.Tasks
   ( 
   -- * Types
     Prioritization
-  -- * Data cleaning
+  -- * Data cleaning / validation
   , reconcileWithThreads
+  , getImpossibleThreads
   -- * Bayes net computation
   , tasksBayesNet
   -- * Computation
@@ -21,6 +22,7 @@ import qualified Data.HashMap.Strict as Map
 import qualified Data.Set as Set
 import           Data.Foldable (foldlM)
 import           Data.Monoid
+import           Data.Maybe (catMaybes)
 import           Airtable.Table
 import           Bayes (SBN)
 import           Bayes.Factor 
@@ -41,7 +43,7 @@ import AirtableComputation.BayesNet
 
 type Prioritization = HashMap ThreadID Double
 
--- * Data cleaning
+-- * Data cleaning / validation
 
 reconcileWithThreads :: Table Thread -> Table Block -> Table Containment
                      -> (Table Block, Table Containment)
@@ -52,6 +54,24 @@ reconcileWithThreads thrTbl_ blkTbl_ cntTbl_ =
                 any (not . exists thrTbl_) [blockingThread blk, blockedThread blk] 
     cntTbl =  vDeleteWhere cntTbl_ $ \cnt -> 
                 any (not . exists thrTbl_) [parentThread cnt, childThread cnt]
+
+-- | Check that for every thread there exists a developer with non-infinite completion time.
+getImpossibleThreads :: Table Thread 
+                      -> Table Velocity 
+                      -> Table Tag 
+                      -> Table Developer 
+                      -> [RecordID]
+getImpossibleThreads thrTbl velTbl tagTbl devTbl = 
+  catMaybes $ map completionImpossibility (selectAllKeys thrTbl)
+  where
+    completionImpossibility thrId = 
+      let thr = vSelect thrTbl thrId
+          getMultipliers devId =     devMultipliersForTask velTbl devId thr 
+                                  ++ missingMultipliersForTask velTbl tagTbl (vSelect devTbl devId) thr
+          multipliers = [getMultipliers (DevID devId) | devId <- selectAllKeys devTbl]
+      in  if any (any (> 0)) multipliers
+            then Nothing
+            else Just thrId
 
 -- * Bayes net 
 
@@ -116,20 +136,28 @@ taskCompletionTime :: Table Tag
                    -> ThreadID 
                    -> DevID 
                    -> Double
-taskCompletionTime tagTbl thrTbl devTbl velTbl (ThreadID thrId) (DevID devId) = 
+taskCompletionTime tagTbl thrTbl devTbl velTbl thrId devId = 
   storyPts / (product devMultipliers * product missingMultipliers)
   where
     dev = vSelect devTbl devId
     thr = vSelect thrTbl thrId
     storyPts = threadStoryPts (vSelect thrTbl thrId)
-    devMultipliers = map vMultiplier $ 
-      vSelectWhere velTbl $ \vel -> 
-            vTag vel `elem` threadTags thr 
-        &&  vDeveloper vel == devId
-    missingMultipliers = map (tagMultiplierIfMissing . recordObj) $ 
-      selectWhere tagTbl $ \rec ->
-            recordId rec `elem` threadTags thr
-        &&  TagID (recordId rec) `notElem` devTags velTbl dev
+    devMultipliers     = devMultipliersForTask velTbl devId thr 
+    missingMultipliers = missingMultipliersForTask velTbl tagTbl dev thr
+
+devMultipliersForTask :: Table Velocity -> DevID -> Thread -> [Double]
+devMultipliersForTask velTbl devId thr = 
+  map vMultiplier $ 
+    vSelectWhere velTbl $ \vel -> 
+          vTag vel `elem` threadTags thr 
+      &&  DevID (vDeveloper vel) == devId
+
+missingMultipliersForTask :: Table Velocity -> Table Tag -> Developer -> Thread -> [Double]
+missingMultipliersForTask velTbl tagTbl dev thr = 
+  map (tagMultiplierIfMissing . recordObj) $ 
+    selectWhere tagTbl $ \rec ->
+          recordId rec `elem` threadTags thr
+      &&  TagID (recordId rec) `notElem` devTags velTbl dev
 
 blockageFactor :: Table Thread
                -> Table Block

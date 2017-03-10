@@ -7,6 +7,8 @@ module Missing
   , var
   , l2_norm
   , standardize
+  , minimumOr
+  , maximumOr
   , trace'
   , lookup
   , Debug(..)
@@ -20,6 +22,7 @@ import           Data.HashMap.Strict (HashMap)
 import qualified Data.HashMap.Strict as Map
 import           Data.Hashable
 import           Data.Monoid
+import           Data.List (minimum, maximum)
 import           Data.Foldable (foldl')
 
 -- These 3 functions are copied from https://hackage.haskell.org/package/hstats-0.3/docs/src/Math-Statistics.html#mean
@@ -53,6 +56,14 @@ standardize xs = map (\x -> (x - mu) / sigma) xs
   where
     mu = mean xs
     sigma = stddev xs
+
+minimumOr :: (Ord a) => a -> [a] -> a
+minimumOr def [] = def
+minimumOr _ xs = minimum xs
+
+maximumOr :: (Ord a) => a -> [a] -> a
+maximumOr def [] = def
+maximumOr _ xs = maximum xs
 
 trace' a b = trace (a <> show b) b
 

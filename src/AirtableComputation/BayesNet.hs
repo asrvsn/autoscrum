@@ -65,4 +65,4 @@ sampleTable bn tbl = do
     unfairCoin :: Double -> IO Bool
     unfairCoin p = flip <$> getStdRandom (randomR (1,100))
       where
-        flip r = r < (p * 100) 
+        flip r = r <= (p * 100) 
