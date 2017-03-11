@@ -70,10 +70,11 @@ uploadTasksDiff curTime opts thrTbl_ thrTbl devTbl =
                        ]
       Deleted thr -> 
         let assignee = vSelect devTbl <$> threadAssignee thr
+            chgStatus = if threadFinished thr then "Done" else "Deleted"
         in  object [ "Thread name" .= threadName thr
                    , "Assignee" .= fmap devName assignee
                    , "Story pts" .= threadStoryPts thr
-                   , "Change" .= [String "Deleted"] 
+                   , "Change" .= [String chgStatus] 
                    , "Date recorded" .= curTime
                    ]
 

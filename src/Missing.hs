@@ -9,6 +9,7 @@ module Missing
   , standardize
   , minimumOr
   , maximumOr
+  , headOr
   , trace'
   , lookup
   , Debug(..)
@@ -64,6 +65,10 @@ minimumOr _ xs = minimum xs
 maximumOr :: (Ord a) => a -> [a] -> a
 maximumOr def [] = def
 maximumOr _ xs = maximum xs
+
+headOr :: a -> [a] -> a
+headOr def [] = def
+headOr _ (x:xs) = x
 
 trace' a b = trace (a <> show b) b
 

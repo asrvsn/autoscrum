@@ -232,13 +232,13 @@ rescaleFeatures :: HasCallStack => [Features] -> [Features]
 rescaleFeatures fs = map (f_unop fromNaN . (\x -> (x - x_min) / (x_max - x_min))) fs
   where
     fromNaN a = if isNaN a then 0 else a
-    x_min = f_nop (minimumOr (error "infinite runtime") . filter (not . isInfinite)) fs
-    x_max = f_nop (maximumOr (error "infinite runtime") . filter (not . isInfinite)) fs
+    x_min = f_nop (minimumOr (error $ "infinite runtime: " <> show fs) . filter (not . isInfinite)) fs
+    x_max = f_nop (maximumOr (error $ "infinite runtime: " <> show fs) . filter (not . isInfinite)) fs
 
 -- * Schedule accessors
 
 getRuntime :: HasCallStack => Schedule -> Double
-getRuntime = maximumOr (error "schedule is empty") . map (head . map fst) . Map.elems
+getRuntime = maximumOr (error "schedule is empty") . map (headOr 0 . map fst) . Map.elems
 
 getWorkingTime :: Schedule -> DevID -> Double
 getWorkingTime mp devId = 

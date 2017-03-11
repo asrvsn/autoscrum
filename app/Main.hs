@@ -66,8 +66,10 @@ main = do
         putStrLn "Got Velocities"
 
         -- FIXME
-        let thrTbl = deleteWhere thrTbl_ $ \rec -> not (threadAssignable (recordObj rec))
-        let (blkTbl, cntTbl) = reconcileWithThreads thrTbl_ blkTbl_ cntTbl_
+        let thrTbl =  deleteWhere thrTbl_ $ \rec -> 
+                           not (threadAssignable (recordObj rec))
+                        || threadStoryPts (recordObj rec) <= 0
+        let (blkTbl, cntTbl) = reconcileWithThreads thrTbl blkTbl_ cntTbl_
 
         -- (-1) data validation
         putStrLn "[1] Data validation"
@@ -79,6 +81,9 @@ main = do
             let thrNames = map (threadName . vSelect thrTbl) xs
             mapM_ (putStrLn . show) thrNames
             abort
+
+        -- TODO more data validation
+        -- check 0 / negative story pts
 
         -- (0) get current time
         putStrLn "[2] get current time"

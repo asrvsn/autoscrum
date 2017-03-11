@@ -43,6 +43,7 @@ import           Data.Hashable (Hashable)
 import           Data.Set (Set)
 import qualified Data.Set as Set
 import           Data.Text (Text)
+import           Data.Monoid
 import           Airtable.Table
 
 import Missing
@@ -171,14 +172,14 @@ data Containment = Containment
 
 instance FromJSON Containment where
   parseJSON = withObject "containment" $ \v -> do
-    parent <- listField "no parent" <$> v .: "Thread"
-    child <- listField "no child" <$> v .: "Subthread"
+    parent <- listField "containment parent error" v <$> v .: "Thread"
+    child <- listField "containment child error" v <$> v .: "Subthread"
     prob <- v .: "Effective P(needed)"
     return $ Containment parent child (prob / 100)
     where
-      listField err xs = case xs of 
+      listField err v xs = case xs of 
         [x] -> x
-        _ -> error err
+        _ -> error $ err <> ": " <> show v
 
 -- * Blocks
 
