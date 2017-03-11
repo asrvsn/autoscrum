@@ -90,14 +90,15 @@ main = do
         curTime <- getCurrentTime
 
         -- (1) upload diff in threads table
-        putStrLn "[3] upload diff in threads table"
-        oldThrTbl <- retrieveRemote "Threads_table_old" 
-        case oldThrTbl of
-          Left l -> do
-            putStrLn l
-            putStrLn "Not uploading task status changes."
-          Right r -> 
-            uploadTasksDiff curTime dashOpts r thrTbl devTbl
+        let uploadDiff = do putStrLn "[3] upload diff in threads table"
+                            oldThrTbl <- retrieveRemote "Threads_table_old" 
+                            case oldThrTbl of
+                              Left l -> do
+                                putStrLn l
+                                putStrLn "Not uploading task status changes."
+                              Right r -> 
+                                uploadTasksDiff curTime dashOpts r thrTbl devTbl
+        yn "Upload diff?" uploadDiff (putStrLn "not uploading.")
 
         -- (2) persist new threads table
         putStrLn "[4] persist new threads table"

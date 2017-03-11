@@ -21,4 +21,4 @@ url_ext :: String
 url_ext = ".url"
 
 n_schedule_samples :: Int
-n_schedule_samples = 10
+n_schedule_samples = 1

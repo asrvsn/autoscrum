@@ -100,7 +100,7 @@ uploadGantt curTime opts thrTbl devTbl sched = do
   ganttUrl <- readFile "sched_vis.url"
   void $ createRecord opts "Plot links" $ 
     object [ "Link" .= ganttUrl
-           , "Link type" .= ("Median gantt chart" :: String)
+           , "Link type" .= [String "Median gantt chart"]
            , "Last updated" .= curTime
            ]
 
@@ -112,7 +112,7 @@ uploadEstimateHistory curTime opts = do
   estUrl <- readFile "estimates_over_time.url"
   void $ createRecord opts "Plot links" $ 
     object [ "Link" .= estUrl
-           , "Link type" .= ("Estimates over time" :: String)
+           , "Link type" .= [String "Estimates over time"]
            , "Last updated" .= curTime
            ]
   where
