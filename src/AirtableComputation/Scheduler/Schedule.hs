@@ -104,7 +104,10 @@ sampledScheduleSummary nSamples prms thrTbl blkTbl cntTbl devTbl tagTbl velTbl =
 
   let timedSchedules =  sortBy (compare `on` snd) $
                           zip schedules (map getRuntime schedules)
-  let getConfidentSchedule c = fst $ timedSchedules !! (max (round $ fromIntegral nSamples * c) 0)
+  let getConfidentSchedule c = case timedSchedules of 
+                                  [] -> error "no schedules computed"
+                                  (x:[]) -> fst x
+                                  xs -> fst $ xs !! (max (round $ fromIntegral nSamples * c) 0)
   return ScheduleSummary 
     { sched20 = getConfidentSchedule 0.2
     , sched50 = getConfidentSchedule 0.5
