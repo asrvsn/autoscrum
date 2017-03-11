@@ -52,18 +52,22 @@ main = do
       "update dashboard" -> do
         -- (-2) get all relevant tables
         putStrLn "[0] Getting all tables"
-        thrTbl <- getRecords opts "Threads"
+        thrTbl_ <- getRecords opts "Threads"
         putStrLn "Got Threads"
-        blkTbl <- getRecords opts "Blocks" 
+        blkTbl_ <- getRecords opts "Blocks" 
         putStrLn "Got Blocks"
         devTbl <- getRecords opts "Developers" 
         putStrLn "Got Developers"
-        cntTbl <- getRecords opts "Containments" 
+        cntTbl_ <- getRecords opts "Containments" 
         putStrLn "Got Containments"
         tagTbl <- getRecords opts "Task types" 
         putStrLn "Got Tasks Types"
         velTbl <- getRecords opts "Velocities" 
         putStrLn "Got Velocities"
+
+        -- FIXME
+        let thrTbl = deleteWhere thrTbl_ $ \rec -> not (threadAssignable (recordObj rec))
+        let (blkTbl, cntTbl) = reconcileWithThreads thrTbl_ blkTbl_ cntTbl_
 
         -- (-1) data validation
         putStrLn "[1] Data validation"
