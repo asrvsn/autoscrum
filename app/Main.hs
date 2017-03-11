@@ -51,7 +51,7 @@ main = do
 
       "update dashboard" -> do
         -- (-2) get all relevant tables
-        putStrLn "(-1) Getting all tables"
+        putStrLn "[0] Getting all tables"
         thrTbl <- getRecords opts "Threads"
         putStrLn "Got Threads"
         blkTbl <- getRecords opts "Blocks" 
@@ -66,7 +66,8 @@ main = do
         putStrLn "Got Velocities"
 
         -- (-1) data validation
-        putStrLn "Check that for every thread there exists a developer with non-infinite completion time."
+        putStrLn "[1] Data validation"
+        putStrLn "(a) Check that for every thread there exists a developer with non-infinite completion time."
         case getImpossibleThreads thrTbl velTbl tagTbl devTbl of
           [] -> pure ()
           xs -> do
@@ -76,11 +77,11 @@ main = do
             abort
 
         -- (0) get current time
-        putStrLn "(0) get current time"
+        putStrLn "[2] get current time"
         curTime <- getCurrentTime
 
         -- (1) upload diff in threads table
-        putStrLn "(1) upload diff in threads table"
+        putStrLn "[3] upload diff in threads table"
         oldThrTbl <- retrieveRemote "Threads_table_old" 
         case oldThrTbl of
           Left l -> do
@@ -90,11 +91,11 @@ main = do
             uploadTasksDiff curTime dashOpts r thrTbl devTbl
 
         -- (2) persist new threads table
-        putStrLn "(2) persist new threads table"
+        putStrLn "[4] persist new threads table"
         persistRemote "Threads_table_old" thrTbl
 
         -- (3) compute 20%, 50%, 80% schedules 
-        putStrLn "(3) compute 20%, 50%, 80% schedules"
+        putStrLn "[5] compute 20%, 50%, 80% schedules"
         prms <- ynCached "sched_params" $ 
           yn  "use default parameters?" 
               (return default_sched_params) 
@@ -110,15 +111,15 @@ main = do
         putStrLn $ debug (devTbl, sched50 schedSummary)
 
         -- (4) upload estimates
-        putStrLn "(4) upload estimates"
+        putStrLn "[6] upload estimates"
         uploadEstimates curTime dashOpts schedSummary
 
         -- (5) upload gantt chart
-        putStrLn "(5) upload gantt chart"
+        putStrLn "[7] upload gantt chart"
         uploadGantt curTime dashOpts thrTbl devTbl (sched50 schedSummary)
 
         -- (6) upload estimates over time chart
-        putStrLn "(6) upload estimates over time chart"
+        putStrLn "[8] upload estimates over time chart"
         uploadEstimateHistory curTime dashOpts
 
       "lookup record" -> do
