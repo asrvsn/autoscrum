@@ -43,36 +43,6 @@ import AirtableComputation.BayesNet
 
 type Prioritization = HashMap ThreadID Double
 
--- * Data cleaning / validation
-
-reconcileWithThreads :: Table Thread -> Table Block -> Table Containment
-                     -> (Table Block, Table Containment)
-reconcileWithThreads thrTbl_ blkTbl_ cntTbl_ = 
-  (blkTbl, cntTbl)
-  where
-    blkTbl =  vDeleteWhere blkTbl_ $ \blk -> 
-                any (not . exists thrTbl_) [blockingThread blk, blockedThread blk] 
-    cntTbl =  vDeleteWhere cntTbl_ $ \cnt -> 
-                any (not . exists thrTbl_) [parentThread cnt, childThread cnt]
-
--- | Check that for every thread there exists a developer with non-infinite completion time.
-getImpossibleThreads :: Table Thread 
-                      -> Table Velocity 
-                      -> Table Tag 
-                      -> Table Developer 
-                      -> [RecordID]
-getImpossibleThreads thrTbl velTbl tagTbl devTbl = 
-  catMaybes $ map completionImpossibility (selectAllKeys thrTbl)
-  where
-    completionImpossibility thrId = 
-      let thr = vSelect thrTbl thrId
-          getMultipliers devId =     devMultipliersForTask velTbl devId thr 
-                                  ++ missingMultipliersForTask velTbl tagTbl (vSelect devTbl devId) thr
-          multipliers = [getMultipliers (DevID devId) | devId <- selectAllKeys devTbl]
-      in  if any (any (> 0)) multipliers
-            then Nothing
-            else Just thrId
-
 -- * Bayes net 
 
 tasksBayesNet :: Table Thread 

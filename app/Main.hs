@@ -52,38 +52,12 @@ main = do
       "update dashboard" -> do
         -- (-2) get all relevant tables
         putStrLn "[0] Getting all tables"
-        thrTbl_ <- getRecords opts "Threads"
-        putStrLn "Got Threads"
-        blkTbl_ <- getRecords opts "Blocks" 
-        putStrLn "Got Blocks"
-        devTbl <- getRecords opts "Developers" 
-        putStrLn "Got Developers"
-        cntTbl_ <- getRecords opts "Containments" 
-        putStrLn "Got Containments"
-        tagTbl <- getRecords opts "Task types" 
-        putStrLn "Got Tasks Types"
-        velTbl <- getRecords opts "Velocities" 
-        putStrLn "Got Velocities"
-
-        -- FIXME
-        let thrTbl =  deleteWhere thrTbl_ $ \rec -> 
-                           not (threadAssignable (recordObj rec))
-                        || threadStoryPts (recordObj rec) <= 0
-        let (blkTbl, cntTbl) = reconcileWithThreads thrTbl blkTbl_ cntTbl_
+        tasksBase0 <- getTasksBase opts
+        putStrLn "Got all tables"
 
         -- (-1) data validation
         putStrLn "[1] Data validation"
-        putStrLn "(a) Check that for every thread there exists a developer with non-infinite completion time."
-        case getImpossibleThreads thrTbl velTbl tagTbl devTbl of
-          [] -> pure ()
-          xs -> do
-            putStrLn "The following have impossible tag configurations:"
-            let thrNames = map (threadName . vSelect thrTbl) xs
-            mapM_ (putStrLn . show) thrNames
-            abort
-
-        -- TODO more data validation
-        -- check 0 / negative story pts
+        tasksBase1 <- runValidator tasksBase0
 
         -- (0) get current time
         putStrLn "[2] get current time"
@@ -97,15 +71,15 @@ main = do
                                 putStrLn l
                                 putStrLn "Not uploading task status changes."
                               Right r -> 
-                                uploadTasksDiff curTime dashOpts r thrTbl devTbl
+                                uploadTasksDiff curTime dashOpts r (threads tasksBase0) (developers tasksBase0)
         yn "Upload diff?" uploadDiff (putStrLn "not uploading.")
 
         -- (2) persist new threads table
         putStrLn "[4] persist new threads table"
-        persistRemote "Threads_table_old" thrTbl
+        persistRemote "Threads_table_old" (threads tasksBase0)
 
         -- (3) compute 20%, 50%, 80% schedules 
-        putStrLn "[5] compute 20%, 50%, 80% schedules"
+        putStrLn "[5] compute schedule estimations"
         prms <- ynCached "sched_params" $ 
           yn  "use default parameters?" 
               (return default_sched_params) 
@@ -115,10 +89,20 @@ main = do
         putStrLn $ debug prms
         putStrLn "...\n"
 
-        schedSummary <- sampledScheduleSummary n_schedule_samples prms thrTbl blkTbl cntTbl devTbl tagTbl velTbl 
+        let thrGetter = do  putStrLn "Enter thread name for schedule computation"
+                            parentThrName <- getLine
+                            case findThr (threads tasksBase1) parentThrName of  
+                              Just parentThrId -> return parentThrId
+                              Nothing -> do
+                                putStrLn "Couldn't find thread ID"
+                                thrGetter 
+        parentThrId <- thrGetter
+        let tasksBase2 = selectSubtasksOf tasksbase1 parentThrId
+        
+        schedSummary <- sampledScheduleSummary n_schedule_samples prms tasksBase2
 
         putStrLn "\nMedian schedule:"
-        putStrLn $ debug (devTbl, sched50 schedSummary)
+        putStrLn $ debug (developers tasksBase1, sched50 schedSummary)
 
         -- (4) upload estimates
         putStrLn "[6] upload estimates"
@@ -126,7 +110,7 @@ main = do
 
         -- (5) upload gantt chart
         putStrLn "[7] upload gantt chart"
-        uploadGantt curTime dashOpts thrTbl devTbl (sched50 schedSummary)
+        uploadGantt curTime dashOpts (threads tasksBase1) (developers tasksBase1) (sched50 schedSummary)
 
         -- (6) upload estimates over time chart
         putStrLn "[8] upload estimates over time chart"

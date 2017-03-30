@@ -7,6 +7,8 @@ module AirtableIO.TasksBase
   ( 
   -- * Constants
     master_thread_name
+  -- * Base type
+  , TasksBase(..)
   -- * ID types
   , ThreadID(..)
   , DevID(..)
@@ -25,6 +27,8 @@ module AirtableIO.TasksBase
   -- * Developers
   , DevName(..)
   , Developer(..)
+  -- * Retrieval
+  , getTasksBase
   -- * Accessors
   , devTags
   , getChildren
@@ -33,7 +37,8 @@ module AirtableIO.TasksBase
   , getBlockages
   , getBlockedThreads
   , getBlockingThreads
-  , getMasterThread
+  , findThr
+  , selectSubtasksOf
   ) where
 
 import           GHC.Generics
@@ -44,6 +49,7 @@ import           Data.Set (Set)
 import qualified Data.Set as Set
 import           Data.Text (Text)
 import           Data.Monoid
+import           Control.Concurrent
 import           Airtable.Table
 
 import Missing
@@ -53,6 +59,17 @@ import Constants
 
 master_thread_name :: ThreadName
 master_thread_name = ThreadName "Valuable at work"
+
+-- * Base type
+
+data TasksBase = TasksBase
+  { threads :: Table Thread
+  , blocks :: Table Block
+  , developers :: Table Developer
+  , containments :: Table Containment
+  , tags :: Table Tag
+  , velocities :: Table Velocity
+  }
 
 -- * ID types
 
@@ -112,6 +129,29 @@ newtype ThreadName =
                            , Eq
                            )
 
+data ThreadStatus 
+  = WorkingOn
+  | Diffed
+  | Done
+  | Blocked
+  | OnPause
+
+instance FromJSON ThreadStatus where
+  parseJSON = withObject "thread status" $ \case
+    "Working On" -> return WorkingOn
+    "Diffed" -> return Diffed
+    "Done" -> return Done
+    "Blocked" -> return Blocked
+    "On pause" -> return OnPause
+
+instance ToJSON ThreadStatus where
+  toJSON = \case
+    WorkingOn -> String "Working on"
+    Diffed -> String "Diffed"
+    Done -> String "Done"
+    Blocked -> String "Blocked"
+    OnPause -> String "On pause"
+
 data Thread = Thread 
   { threadName :: ThreadName
   , threadTags :: [RecordID]
@@ -121,6 +161,7 @@ data Thread = Thread
   , threadAssignable :: Bool
   , threadFinished :: Bool
   , threadAssignee :: Maybe RecordID
+  , threadStatus :: Maybe ThreadStatus
   } deriving ( Show
              , Read
              , Eq
@@ -136,6 +177,7 @@ instance FromJSON Thread where
            <*> (boolField <$> v .: "Assignable?")
            <*> (boolField <$> v .: "Done?")
            <*> (headMay <$> v .:? "Assignee" .!= [])
+           <*> v .:? "Status"
     where
       boolField :: Double -> Bool
       boolField n = n == fromInteger 1
@@ -152,6 +194,7 @@ instance ToJSON Thread where
                       , "Assignable?" .= boolField (threadAssignable thr)
                       , "Done?" .= boolField (threadFinished thr)
                       , "Assignee" .= maybe [] (\a -> [a]) (threadAssignee thr)
+                      , "Status" .= threadStatus thr
                       ]
     where
       boolField :: Bool -> Double
@@ -241,6 +284,19 @@ instance FromJSON Developer where
 instance Debug Developer where
   debug = show . devName
 
+-- * Retrieval
+
+getTasksBase :: AirtableOptions -> IO TasksBase
+getTasksBase opts = wait =<< 
+  (TasksBase
+    <$> async (getRecords opts "Threads")
+    <*> async (getRecords opts "Blocks")
+    <*> async (getRecords opts "Developers")
+    <*> async (getRecords opts "Containments")
+    <*> async (getRecords opts "Task types")
+    <*> async (getRecords opts "Velocities")
+  )
+
 -- * Accessors
 
 devTags :: Table Velocity
@@ -304,8 +360,11 @@ getBlockingThreads blkTbl thrTbl thrId =
          blockedThread blk == getThreadId thrId
       && not (threadFinished $ vSelect thrTbl thrId)
 
-getMasterThread :: Table Thread -> ThreadID
-getMasterThread thrTbl = ThreadID thrId
+findThr :: Table Thread -> ThreadID
+findThr thrTbl thrName = case result of 
+  [thrId] -> Just $ ThreadID thrId
+  _ -> Nothing
   where
-    [thrId] = vSelectKeyWhere thrTbl $ \thr -> 
-                threadName thr == master_thread_name
+    result = vSelectKeyWhere thrTbl $ \thr -> 
+                threadName thr == thrName
+

@@ -85,14 +85,9 @@ data ScheduleSummary = ScheduleSummary
 sampledScheduleSummary :: HasCallStack
                        => Int
                        -> ScheduleParams
-                       -> Table Thread
-                       -> Table Block
-                       -> Table Containment
-                       -> Table Developer
-                       -> Table Tag
-                       -> Table Velocity
+                       -> TasksBase
                        -> IO ScheduleSummary
-sampledScheduleSummary nSamples prms thrTbl blkTbl cntTbl devTbl tagTbl velTbl = do
+sampledScheduleSummary nSamples prms base = do
   let bn = tasksBayesNet thrTbl cntTbl 
   schedules <- forM [1..nSamples] $ \i -> do
     putStrLn $ "Sample " <> show i <> " ..."
