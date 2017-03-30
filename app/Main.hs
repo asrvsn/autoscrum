@@ -45,7 +45,7 @@ main = do
     ] $ \case
 
       "first-time setup (run this if you haven't)" -> do
-        mightNeedSudo "pip install plotly shortid"
+        mightNeedSudo "pip install plotly shortid numpy"
         system "mkdir ~/.plotly"
         system "cp .plotly/.credentials ~/.plotly/"
         return ()
@@ -53,16 +53,26 @@ main = do
       "update dashboard" -> do
         -- (-2) get all relevant tables
         putStrLn "[0] Getting all tables"
-        tasksBase0 <- getTasksBase opts
+        base0 <- getTasksBase opts
         putStrLn "Got all tables"
 
         -- (-1) data validation
-        putStrLn "[1] Data validation"
-        base1 <- runValidator tasksBase0
+        let thrGetter = do  putStrLn "Enter thread name for schedule computation"
+                            parentThrName <- getLine
+                            case findThr (threads base0) (ThreadName $ T.pack parentThrName) of  
+                              Just parentThrId -> return parentThrId
+                              Nothing -> do
+                                putStrLn $ "Couldn't find thread ID for name: " ++ show parentThrName
+                                thrGetter 
+        parentThrId <- thrGetter
+        let base1 = selectDescendantsOf parentThrId base0
 
         -- (0) get current time
         putStrLn "[2] get current time"
         curTime <- getCurrentTime
+
+        putStrLn "[1] Data validation"
+        base2 <- runValidator base1
 
         -- (1) upload diff in threads table
         let uploadDiff = do putStrLn "[3] upload diff in threads table"
@@ -72,12 +82,12 @@ main = do
                                 putStrLn l
                                 putStrLn "Not uploading task status changes."
                               Right r -> 
-                                uploadTasksDiff curTime dashOpts r (threads tasksBase0) (developers tasksBase0)
+                                uploadTasksDiff curTime dashOpts r (threads base0) (developers base0)
         yn "Upload diff?" uploadDiff (putStrLn "not uploading.")
 
         -- (2) persist new threads table
         putStrLn "[4] persist new threads table"
-        persistRemote "Threads_table_old" (threads tasksBase0)
+        persistRemote "Threads_table_old" (threads base0)
 
         -- (3) compute 20%, 50%, 80% schedules 
         putStrLn "[5] compute schedule estimations"
@@ -89,16 +99,6 @@ main = do
         putStrLn "\nComputing schedule using parameters:\n"
         putStrLn $ debug prms
         putStrLn "...\n"
-
-        let thrGetter = do  putStrLn "Enter thread name for schedule computation"
-                            parentThrName <- getLine
-                            case findThr (threads base1) (ThreadName $ T.pack parentThrName) of  
-                              Just parentThrId -> return parentThrId
-                              Nothing -> do
-                                putStrLn "Couldn't find thread ID"
-                                thrGetter 
-        parentThrId <- thrGetter
-        let base2 = selectDescendantsOf parentThrId base1 
         
         schedSummary <- sampledScheduleSummary n_schedule_samples prms base2
 

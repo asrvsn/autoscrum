@@ -141,12 +141,12 @@ data ThreadStatus
 
 instance FromJSON ThreadStatus where
   parseJSON = withText "thread status" $ \case
-    "Working On" -> return WorkingOn
+    "Working on" -> return WorkingOn
     "Diffed" -> return Diffed
     "Done" -> return Done
     "Blocked" -> return Blocked
     "On pause" -> return OnPause
-    _ -> fail "thread status was not recognized"
+    other -> fail $ "thread status was not recognized: " ++ show other
 
 instance ToJSON ThreadStatus where
   toJSON = \case
