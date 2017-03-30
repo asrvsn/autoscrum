@@ -52,7 +52,7 @@ tableCUDHistory cmp tbl_ tbl =
 
 data TimeEstimation = TimeEstimation
   { runDate :: UTCTime
-  , estThreadName :: Text
+  , estParentThread :: Text
   , est20 :: Double
   , est50 :: Double
   , est80 :: Double
@@ -61,7 +61,7 @@ data TimeEstimation = TimeEstimation
 instance FromJSON TimeEstimation where
   parseJSON = withObject "time estimation" $ \v ->
     TimeEstimation <$> v .: "Run date"
-                   <*> v .: "Thread name"
+                   <*> v .: "Parent thread"
                    <*> v .: "20% estimate"
                    <*> v .: "50% estimate"
                    <*> v .: "80% estimate" 
@@ -69,7 +69,7 @@ instance FromJSON TimeEstimation where
 instance ToJSON TimeEstimation where
   toJSON tEst = 
     object [ "Run date" .= runDate tEst
-           , "Thread name" .= estThreadName tEst
+           , "Parent thread" .= estParentThread tEst
            , "20% estimate" .= est20 tEst
            , "50% estimate" .= est50 tEst
            , "80% estimate" .= est80 tEst

@@ -6,6 +6,7 @@ module AirtableIO.DashboardUpdate
   , uploadEstimates
   , uploadGantt
   , uploadEstimateHistory
+  , uploadComputedSchedule
   ) where
 
 import           Data.Time.Clock (UTCTime)
@@ -14,6 +15,7 @@ import           Data.List (sortBy)
 import           Data.Aeson
 import           Data.Monoid
 import qualified Data.Text as T
+import qualified Data.HashMap.Strict as Map
 import           Data.Foldable (forM_)
 import qualified Data.ByteString.Lazy.Char8 as BLC
 import           Control.Monad (void)
@@ -85,7 +87,7 @@ uploadEstimates curTime opts summary (ThreadName thrName) =
   void $ createRecord opts "Time estimations" $ 
     toJSON $ TimeEstimation 
       { runDate = curTime
-      , estThreadName = thrName
+      , estParentThread = thrName
       , est20 = getRuntime (sched20 summary)
       , est50 = getRuntime (sched50 summary)
       , est80 = getRuntime (sched80 summary) 
@@ -103,7 +105,7 @@ uploadGantt curTime opts thrTbl devTbl thrName sched = do
   system "python gantt.py sched_vis"
   ganttUrl <- readFile "sched_vis.url"
   void $ createRecord opts "Plot links" $ 
-    object [ "Thread name" .= thrName
+    object [ "Parent thread" .= thrName
            , "Link" .= ganttUrl
            , "Link type" .= [String "Median gantt chart"]
            , "Last updated" .= curTime
@@ -112,16 +114,30 @@ uploadGantt curTime opts thrTbl devTbl thrName sched = do
 uploadEstimateHistory :: UTCTime -> AirtableOptions -> ThreadName -> IO ()
 uploadEstimateHistory curTime opts (ThreadName thrName) = do
   timeEsts <- getRecords opts "Time estimations"
-  let thrTimeEsts = filter (\est -> estThreadName est == thrName) $ vSelectAll timeEsts
+  let thrTimeEsts = filter (\est -> estParentThread est == thrName) $ vSelectAll timeEsts
   persist "estimates_over_time" (map toPyTimeEst (sortByTime thrTimeEsts))
   system $ "python estimates.py estimates_over_time " <> T.unpack thrName
   estUrl <- readFile "estimates_over_time.url"
   void $ createRecord opts "Plot links" $ 
     object [ "Link" .= estUrl
-           , "Thread name" .= thrName
+           , "Parent thread" .= thrName
            , "Link type" .= [String "Estimates over time"]
            , "Last updated" .= curTime
            ]
   where
     sortByTime = sortBy (compare `on` runDate)
     toPyTimeEst est = (runDate est, est20 est, est50 est, est80 est)
+
+uploadComputedSchedule :: TasksBase -> UTCTime -> AirtableOptions -> ThreadName -> Schedule -> IO ()
+uploadComputedSchedule base curTime opts thrName sched = do
+  forM_ entries $ \(dev, timeline) -> do
+    forM_ timeline $ \(elapsed, thread) -> 
+      createRecord opts "Computed schedules" $ 
+        object [ "Parent thread" .= thrName
+               , "Task" .= maybe (ThreadName "Blocked") id thread
+               , "Developer" .= dev
+               , "Runtime" .= elapsed
+               , "Date computed" .= curTime]
+  where
+    entries = Map.toList (getVis vis)
+    vis = schedule2vis (threads base) (developers base) sched

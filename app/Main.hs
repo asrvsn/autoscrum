@@ -118,6 +118,10 @@ main = do
         putStrLn "[8] upload estimates over time chart"
         uploadEstimateHistory curTime dashOpts parentThrName
 
+        -- (7) upload computed schedule
+        putStrLn "[9] upload computed schedule"
+        uploadComputedSchedule base0 curTime dashOpts parentThrName (sched50 schedSummary)
+
       "lookup record" -> do
         cmdOptions [
             "threads"
