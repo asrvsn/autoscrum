@@ -17,7 +17,6 @@ f_vis_name = sys.argv[1]
 def to_unix_time(dt):
     epoch =  datetime.datetime.utcfromtimestamp(0).replace(tzinfo=tzutc())
     delta = (dt- epoch).total_seconds() * 1000
-    print delta
     return delta
 
 with open(f_vis_name + ".cache", 'r') as f_vis: 
@@ -59,9 +58,6 @@ with open(f_vis_name + ".cache", 'r') as f_vis:
     # )
 
     # data = [trace1, trace2, trace3]
-
-    print dates 
-    print est_middle
 
     trace = go.Scatter(
         x=dates,

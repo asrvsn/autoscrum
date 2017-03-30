@@ -10,10 +10,37 @@ idgen = ShortId()
 
 f_vis_name = sys.argv[1]
 
+colors = [
+    'ef5350',
+    'EC407A',
+    'AB47BC',
+    '7E57C2',
+    '5C6BC0',
+    '42A5F5',
+    '29B6F6',
+    '26C6DA',
+    '26A69A',
+    '66BB6A',
+    '9CCC65',
+    'D4E157',
+    'FFEE58',
+    'FFCA28',
+    'FFA726',
+    'FF7043',
+    '8D6E63',
+    'BDBDBD',
+    '78909C'
+    ]
+
 with open(f_vis_name + ".cache", 'r') as f_vis: 
+    my_id = idgen.generate()
+
     vis = json.loads(f_vis.read())
 
     traces = []
+
+    i = 0
+
     for dev, timeline in vis.iteritems():
         for entry in timeline:
             if entry[1] == None:
@@ -27,9 +54,9 @@ with open(f_vis_name + ".cache", 'r') as f_vis:
             else:
                 name = entry[1]
                 marker = dict(
-                        color = 'rgba(246, 78, 139, 0.6)',
+                        color = colors[i],
                         line = dict(
-                            color = 'rgba(246, 78, 139, 1.0)',
+                            color = colors[i],
                             width = 3)
                     )
 
@@ -38,20 +65,29 @@ with open(f_vis_name + ".cache", 'r') as f_vis:
                 x=[entry[0]],
                 name=name,
                 orientation='h',
-                marker = marker
+                marker = marker,
+                legendgroup=dev
                 )
             traces.append(trace)
 
-    title = 'AlphaSheets dev timeline (' + idgen.generate() + ')'
+        i = (i + 1) % len(colors)
+
+    title = 'AlphaSheets dev timeline (' + my_id + ')'
 
     layout = go.Layout(
+        autosize=False,
+        width=1500,
+        height=1000,
         barmode='stack',
-        showlegend=False,
-        title=title
+        title=title,
+        legend=dict(xanchor='left',yanchor='bottom',x=-2)
+        # margin=go.Margin(
+        #     t=1000
+        # )
     )
 
     fig = go.Figure(data=traces, layout=layout)
-    url = py.plot(fig, filename='marker-h-bar', auto_open=False)
+    url = py.plot(fig, filename='marker-h-bar-'+my_id, auto_open=False)
 
     with open(f_vis_name + ".url", 'w') as f_url:
         f_url.write(url)        
