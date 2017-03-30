@@ -7,6 +7,7 @@ import sys
 
 from shortid import ShortId
 from dateutil.parser import parse
+from dateutil.tz import tzutc
 import datetime
 
 idgen = ShortId()
@@ -14,17 +15,20 @@ idgen = ShortId()
 f_vis_name = sys.argv[1]
 
 def to_unix_time(dt):
-    print dt
-    epoch =  datetime.datetime.utcfromtimestamp(0)
-    return (dt - epoch).total_seconds() * 1000
+    epoch =  datetime.datetime.utcfromtimestamp(0).replace(tzinfo=tzutc())
+    delta = (dt- epoch).total_seconds() * 1000
+    print delta
+    return delta
 
 with open(f_vis_name + ".cache", 'r') as f_vis: 
-    est = np.array(json.loads(f_vis.read()))
+    my_id = idgen.generate()
 
-    dates       = [parse(d) for d in est[:,0]]
-    est_lower   = est[:,1]
-    est_middle  = est[:,2]
-    est_upper   = est[:,3]
+    est = json.loads(f_vis.read())
+
+    dates       = [parse(elem[0]) for elem in est]
+    est_lower   = [elem[1] for elem in est]
+    est_middle  = [elem[2] for elem in est]
+    est_upper   = [elem[3] for elem in est]
 
     # FIXME anand: I just removed the other traces since we don't care 
     # about the confidence interval
@@ -56,30 +60,31 @@ with open(f_vis_name + ".cache", 'r') as f_vis:
 
     # data = [trace1, trace2, trace3]
 
+    print dates 
+    print est_middle
+
     trace = go.Scatter(
         x=dates,
-        y=est_lower,
-        fill='tonexty',
-        mode='lines',
+        y=est_middle,
+        text=[str(e) for e in est_middle],
+        fill='tozeroy',
+        mode='lines+markers+text',
         line=dict(width=0.5, color='rgb(111, 231, 219)'),
-        name='Dev completion time (days)'
+        name='Dev completion time (days)',
+        textposition='top'
     )
     data = [trace]
 
-    title = 'AlphaSheets completion estimates over time (' + idgen.generate() + ')'
+    title = 'AlphaSheets completion estimates over time (' + my_id + ')'
     layout = go.Layout(
         showlegend=True,
-        xaxis=dict(
-            type='category',
-            range=[to_unix_time(dates[0]), to_unix_time(dates[-1])]
-        ),
         yaxis=dict(
             type='linear',
         ),
         title=title
     )
     fig = go.Figure(data=data, layout=layout)
-    url = py.plot(fig, filename='stacked-area-plot', auto_open=False)
+    url = py.plot(fig, filename='stacked-area-plot-'+my_id, auto_open=False)
 
     with open(f_vis_name + ".url", 'w') as f_url:
         f_url.write(url)        

@@ -79,10 +79,10 @@ threadStatusFilter = modifyBase $ \b ->
                     Nothing -> False
                     Just s  -> 
                       case s of 
-                        WorkingOn   -> True
-                        Blocked     -> True 
-                        OnPause     -> True
-                        _           -> False
+                        WorkingOn   -> False
+                        Blocked     -> False 
+                        OnPause     -> False
+                        _           -> True
   in reconcileWithThreads thrTbl_ b
 
 threadStatusGuard :: ValidateM ()
