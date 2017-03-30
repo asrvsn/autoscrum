@@ -1,7 +1,13 @@
 {-# LANGUAGE LambdaCase #-}
 
 module AirtableIO.TasksBaseValidate 
-  (
+  ( 
+  -- * public API
+    runValidator
+  -- * Data cleaning
+  , reconcileWithThreads
+  , selectDescendantsOf
+  , 
   ) where
 
 import Control.Monad.State
@@ -12,6 +18,21 @@ type ValidateM = StateT (TasksBase, [ValidateError]) IO
 
 data ValidateError = 
     ThrErr RecordID String
+
+-- * public API
+
+runValidator :: TasksBase -> IO TasksBase
+runValidator base = 
+  runValidateM base (foldl' (>>) (pure ()) validators)
+  where
+    validators = 
+      [ positiveStoryPtFilter
+      , threadStatusFilter
+      , threadStatusGuard
+      , taskImpossibilityGuard
+      ]
+
+-- * helpers
 
 runValidateM :: TasksBase -> ValidateM () -> IO TasksBase
 runValidateM base vm = do
@@ -33,25 +54,48 @@ showValidateError base = \case
   ThrErr rec err -> 
     "error in {" ++ (take 40 . threadName . vSelect (threads base)) rec ++ "}: " ++ err
 
-runValidator :: TasksBase -> IO TasksBase
-runValidator base = 
-  runValidateM base (foldl' (>>) (pure ()) validators)
-  where
-    validators = 
-      [ positiveStoryPtFilter
-      , taskImpossibilityGuard
-      ]
+-- * validators 
 
 positiveStoryPtFilter :: ValidateM ()
 positiveStoryPtFilter = modifyBase $ \b -> 
   let thrTbl = threads b
       blkTbl = blocks b
       cntTbl = containments b
-      thrTbl_ = deleteWhere thrTbl_ $ \rec -> 
+      thrTbl_ = deleteWhere thrTbl $ \rec -> 
                    not (threadAssignable (recordObj rec))
                 || threadStoryPts (recordObj rec) <= 0
-      (blkTbl_, cntTbl_) = reconcileWithThreads thrTbl_ blkTbl cntTbl
-  in b { threads = thrTbl_, blocks = blkTbl_, containments = cntTbl_ } 
+  in reconcileWithThreads thrTbl_ b
+
+threadStatusFilter :: ValidateM ()
+threadStatusFilter = modifyBase $ \b -> 
+  let thrTbl_ = deleteWhere (threads base) $ \rec -> 
+                  case threadStatus (recordObj rec) of 
+                    Nothing -> False
+                    Just s  -> 
+                      case s of 
+                        WorkingOn   -> True
+                        Blocked     -> True 
+                        OnPause     -> True
+                        _           -> False
+  in reconcileWithThreads thrTbl_ b
+
+threadStatusGuard :: ValidateM ()
+threadStatusGuard = do
+  thrs <- gets (selectAll . threads)
+  forM_ thrs $ \(thrId, thr) -> 
+    let shouldBeAssigned = 
+          case (threadAssignee thr) of 
+            Nothing -> validateErr $ ThrErr thrId "Had a WorkingOn, Blocked, or OnPause status but had no assignee"
+            Just _  -> okay
+        okay = pure ()
+    in  case (threadStatus thr) of 
+          Nothing -> okay
+          Just s  -> 
+            case s of 
+              WorkingOn   -> shouldBeAssigned 
+              Blocked     -> shouldBeAssigned
+              OnPause     -> shouldBeAssigned
+              _           -> okay 
 
 taskImpossibilityGuard :: ValidateM ()
 taskImpossibilityGuard = do
@@ -63,14 +107,13 @@ taskImpossibilityGuard = do
 
 -- * Data cleaning / validation
 
-reconcileWithThreads :: Table Thread -> Table Block -> Table Containment
-                     -> (Table Block, Table Containment)
-reconcileWithThreads thrTbl_ blkTbl_ cntTbl_ = 
-  (blkTbl, cntTbl)
+reconcileWithThreads :: Table Thread -> TasksBase -> TasksBase
+reconcileWithThreads thrTbl_ base = 
+  base { threads = thrTbl_, blocks = blkTbl_, containments = cntTbl_ }
   where
-    blkTbl =  vDeleteWhere blkTbl_ $ \blk -> 
+    blkTbl_ =  vDeleteWhere (blocks base) $ \blk -> 
                 any (not . exists thrTbl_) [blockingThread blk, blockedThread blk] 
-    cntTbl =  vDeleteWhere cntTbl_ $ \cnt -> 
+    cntTbl_ =  vDeleteWhere (containments base) $ \cnt -> 
                 any (not . exists thrTbl_) [parentThread cnt, childThread cnt]
 
 -- | Check that for every thread there exists a developer with non-infinite completion time.
@@ -89,3 +132,19 @@ getImpossibleThreads base =
       in  if any (any (> 0)) multipliers
             then Nothing
             else Just thrId
+
+selectDescendantsOf :: ThreadID -> TasksBase -> TasksBase
+selectDescendantsOf thrId base = 
+  case vSelectMaybe (threads base) thrId of 
+    Nothing -> error "selectDescendantsOf: could not find thread "
+    Just _  -> 
+      let thrTbl_ = worker (fromList []) [thrId]
+      in  reconcileWithThreads thrTbl_ base
+  where
+    insert (Table recs o) k v = Table (Map.insert k v recs) o
+    worker thrTbl_ []     = thrTbl_ 
+    worker thrTbl_ thrIds = 
+      let childIds  = concatMap (getChildren (containments base)) thrIds
+          childThrs = map (vSelect (threads base)) childIds 
+          thrTbl_'  = foldr (uncurry (insert thrTbl_)) thrTbl_ (zip childIds childThrs)
+      in worker thrTbl_' childIds

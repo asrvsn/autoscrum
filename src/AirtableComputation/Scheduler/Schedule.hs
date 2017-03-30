@@ -109,25 +109,36 @@ sampledScheduleSummary nSamples prms base = do
     , sched80 = getConfidentSchedule 0.8
     }
 
+-- Populates schedule with preassigned tasks.
+initSchedule :: TasksBase -> Schedule
+initSchedule base = 
+  let getAssignee thr = case (threadAssignee thr) of 
+        Nothing -> error $ "initSchedule: expected " ++ show thr ++ " to be assigned"
+        Just d  -> d
+      schedule0   = Map.fromList $ zip (map DevID devs) (repeat [])
+      preAssigned = 
+        catMaybes $ for (selectAll (threads base)) $ 
+          \(thrId, thr) -> 
+            case (threadStatus thr) of 
+              Nothing -> Nothing
+              Just s  -> 
+                case s of 
+                  WorkingOn   -> Just (thrId, getAssignee thr)
+                  _           -> Nothing
+
+  in foldl' (\s (t,d) -> assign base t d s) schedule0 preAssigned
+
 schedule :: HasCallStack 
         => BayesNet RecordID
-        -> Table Thread
-        -> Table Block
-        -> Table Containment
-        -> Table Developer 
-        -> Table Tag 
-        -> Table Velocity 
+        -> TasksBase
         -> ScheduleParams
         -> Schedule
-schedule bn thrTbl blkTbl cntTbl devTbl tagTbl velTbl prms = 
-  execState flushTasks initSchedule
+schedule bn base prms = 
+  execState flushTasks (initSchedule base) 
   where
-    devs  = selectAllKeys devTbl
+    devs  = selectAllKeys (developers base)
 
-    initSchedule = Map.fromList $ zip (map DevID devs) (repeat [])
-
-    prioritization = prioritize bn thrTbl blkTbl cntTbl
-    
+    prioritization = prioritize bn base
 
     flushTasks :: HasCallStack => State Schedule ()
     flushTasks = do
@@ -141,7 +152,7 @@ schedule bn thrTbl blkTbl cntTbl devTbl tagTbl velTbl prms =
           features <- mapM (uncurry assignmentFeatures) possibleAssignments
           let losses = map (loss prms) (rescaleFeatures features)
           let ((t, d), _) = minimumBy (compare `on` snd) (zip possibleAssignments losses)
-          assign t d
+          modify $ assign base t d
           flushTasks
 
     getUnblockedTasks :: State Schedule [ThreadID]
@@ -163,7 +174,7 @@ schedule bn thrTbl blkTbl cntTbl devTbl tagTbl velTbl prms =
       t_dev  <- getDevAvailability devId
       let t_unblocked = max t_task t_dev
       -- (2) dev completion time
-      let t_elapsed = taskCompletionTime tagTbl thrTbl devTbl velTbl thrId devId   
+      let t_elapsed = taskCompletionTime base thrId devId   
       -- (3) task priority
       let priority = prioritization `lookup` thrId
       return $ Features {
@@ -171,46 +182,45 @@ schedule bn thrTbl blkTbl cntTbl devTbl tagTbl velTbl prms =
         , f_priority = priority
         }
 
-    assign :: ThreadID -> DevID -> State Schedule ()
-    assign thrId devId = do
-      let dt_task_ = taskCompletionTime tagTbl thrTbl devTbl velTbl thrId devId
-        -- TODO(anand) deal with negative completion times (bad data) better.
-          dt_task = if dt_task_ > 0 then dt_task_ else 1
-      t_task <- getTaskAvailability thrId
-      t_dev  <- getDevAvailability devId
-      let elapsed = if t_task > t_dev 
-                      then [(t_task + dt_task, Just thrId), (t_task, Nothing)]
-                      else [(t_dev + dt_task, Just thrId)]
-      modify $ 
-        Map.adjust (\ts -> elapsed ++ ts) devId
+assign :: TasksBase -> ThreadID -> DevID -> Schedule -> Schedule 
+assign base thrId devId mp = do
+  let dt_task_  = taskCompletionTime base thrId devId
+    -- TODO(anand) deal with negative completion times (bad data) better.
+      dt_task   = if dt_task_ > 0 then dt_task_ else 1
+      t_task    = getTaskAvailability base mp thrId 
+      t_dev     = getDevAvailability mp devId
+      elapsed   = if t_task > t_dev 
+                    then [(t_task + dt_task, Just thrId), (t_task, Nothing)]
+                    else [(t_dev + dt_task, Just thrId)]
+  in  Map.adjust (\ts -> elapsed ++ ts) devId mp
 
-    getTaskAvailability :: HasCallStack => ThreadID -> State Schedule Double
-    getTaskAvailability thrId = do
-      let blkThrs = getBlockingThreads blkTbl thrTbl thrId
-      blkTimes <- mapM getCompletedTaskTime blkThrs
-      return $ case blkTimes of 
-        [] -> 0
-        _  -> assertPositive "blkTimes" blkTimes $ maximum blkTimes
+getTaskAvailability :: HasCallStack => TasksBase -> Schedule -> ThreadID -> Double
+getTaskAvailability base mp thrId = 
+  let blkThrs   = getBlockingThreads (blocks base) (threads base) thrId
+      blkTimes  = map (getCompletedTaskTime mp) blkThrs
+  return $ case blkTimes of 
+    [] -> 0
+    _  -> assertPositive "blkTimes" blkTimes $ maximum blkTimes
 
-    getDevAvailability :: HasCallStack => DevID -> State Schedule Double
-    getDevAvailability devId = gets $ \mp -> 
-      case mp `lookup` devId of
-        []   -> 0
-        t:ts -> assertPositive "devAvailability" mp $ fst t 
+getDevAvailability :: HasCallStack => Schedule -> DevID -> Double
+getDevAvailability mp devId = 
+  case mp `lookup` devId of
+    []   -> 0
+    t:ts -> assertPositive "devAvailability" mp $ fst t 
 
-    getCompletedTaskTime :: ThreadID -> State Schedule Double
-    getCompletedTaskTime thrId = gets $ \mp -> 
-      let rec [] = error $ "could not find completed task " ++ show thrId ++ "in schedule"
-          rec (timeline:rest) = case find (\(_, mode) -> Just thrId == mode) timeline of 
-                                  Just (t_task, _) -> t_task
-                                  Nothing -> rec rest
-      in rec (Map.elems mp) 
+getCompletedTaskTime :: Schedule -> ThreadID -> Double
+getCompletedTaskTime mp thrId = 
+  let rec [] = error $ "could not find completed task " ++ show thrId ++ "in schedule"
+      rec (timeline:rest) = case find (\(_, mode) -> Just thrId == mode) timeline of 
+                              Just (t_task, _) -> t_task
+                              Nothing -> rec rest
+  in rec (Map.elems mp) 
 
-    assertPositive :: (HasCallStack, Show a) => String -> a -> Double -> Double
-    assertPositive tag a i = 
-      if i > 0 
-        then i 
-        else error $ "assertPositive failed for {" <> tag <> "}: \n" <> show a
+assertPositive :: (HasCallStack, Show a) => String -> a -> Double -> Double
+assertPositive tag a i = 
+  if i > 0 
+    then i 
+    else error $ "assertPositive failed for {" <> tag <> "}: \n" <> show a
 
 -- helpers 
 

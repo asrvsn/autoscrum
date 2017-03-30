@@ -2,6 +2,7 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE NoImplicitPrelude #-}
+{-# LANGUAGE LambdaCase #-}
 
 module AirtableIO.TasksBase 
   ( 
@@ -38,7 +39,6 @@ module AirtableIO.TasksBase
   , getBlockedThreads
   , getBlockingThreads
   , findThr
-  , selectSubtasksOf
   ) where
 
 import           GHC.Generics
@@ -51,6 +51,7 @@ import           Data.Text (Text)
 import           Data.Monoid
 import           Control.Concurrent
 import           Airtable.Table
+import           Airtable.Query
 
 import Missing
 import Constants

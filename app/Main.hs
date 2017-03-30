@@ -97,7 +97,7 @@ main = do
                                 putStrLn "Couldn't find thread ID"
                                 thrGetter 
         parentThrId <- thrGetter
-        let tasksBase2 = selectSubtasksOf tasksbase1 parentThrId
+        let tasksBase2 = selectDescendantsOf parentThreadId tasksbase1 
         
         schedSummary <- sampledScheduleSummary n_schedule_samples prms tasksBase2
 
