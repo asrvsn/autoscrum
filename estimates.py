@@ -14,6 +14,10 @@ idgen = ShortId()
 
 f_vis_name = sys.argv[1]
 
+thr_name = "UNSPECIFIED"
+if (len(sys.argv) > 2):
+    thr_name = sys.argv[2]
+
 def to_unix_time(dt):
     epoch =  datetime.datetime.utcfromtimestamp(0).replace(tzinfo=tzutc())
     delta = (dt- epoch).total_seconds() * 1000
@@ -71,7 +75,7 @@ with open(f_vis_name + ".cache", 'r') as f_vis:
     )
     data = [trace]
 
-    title = 'AlphaSheets completion estimates over time (' + my_id + ')'
+    title = 'Completion estimate for {' + thr_name + '}'
     layout = go.Layout(
         showlegend=True,
         yaxis=dict(

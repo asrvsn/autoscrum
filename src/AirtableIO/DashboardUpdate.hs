@@ -12,6 +12,8 @@ import           Data.Time.Clock (UTCTime)
 import           Data.Function (on)
 import           Data.List (sortBy)
 import           Data.Aeson
+import           Data.Monoid
+import qualified Data.Text as T
 import           Data.Foldable (forM_)
 import qualified Data.ByteString.Lazy.Char8 as BLC
 import           Control.Monad (void)
@@ -78,11 +80,12 @@ uploadTasksDiff curTime opts thrTbl_ thrTbl devTbl =
                    , "Date recorded" .= curTime
                    ]
 
-uploadEstimates :: UTCTime -> AirtableOptions -> ScheduleSummary -> IO ()
-uploadEstimates curTime opts summary = 
+uploadEstimates :: UTCTime -> AirtableOptions -> ScheduleSummary -> ThreadName -> IO ()
+uploadEstimates curTime opts summary (ThreadName thrName) = 
   void $ createRecord opts "Time estimations" $ 
     toJSON $ TimeEstimation 
       { runDate = curTime
+      , estThreadName = thrName
       , est20 = getRuntime (sched20 summary)
       , est50 = getRuntime (sched50 summary)
       , est80 = getRuntime (sched80 summary) 
@@ -92,26 +95,30 @@ uploadGantt :: UTCTime
             -> AirtableOptions
             -> Table Thread
             -> Table Developer
+            -> ThreadName
             -> Schedule
             -> IO ()
-uploadGantt curTime opts thrTbl devTbl sched = do
+uploadGantt curTime opts thrTbl devTbl thrName sched = do
   persist "sched_vis" (schedule2vis thrTbl devTbl sched)
   system "python gantt.py sched_vis"
   ganttUrl <- readFile "sched_vis.url"
   void $ createRecord opts "Plot links" $ 
-    object [ "Link" .= ganttUrl
+    object [ "Thread name" .= thrName
+           , "Link" .= ganttUrl
            , "Link type" .= [String "Median gantt chart"]
            , "Last updated" .= curTime
            ]
 
-uploadEstimateHistory :: UTCTime -> AirtableOptions -> IO ()
-uploadEstimateHistory curTime opts = do
+uploadEstimateHistory :: UTCTime -> AirtableOptions -> ThreadName -> IO ()
+uploadEstimateHistory curTime opts (ThreadName thrName) = do
   timeEsts <- getRecords opts "Time estimations"
-  persist "estimates_over_time" (map toPyTimeEst (sortByTime $ vSelectAll timeEsts))
-  system "python estimates.py estimates_over_time"
+  let thrTimeEsts = filter (\est -> estThreadName est == thrName) $ vSelectAll timeEsts
+  persist "estimates_over_time" (map toPyTimeEst (sortByTime thrTimeEsts))
+  system $ "python estimates.py estimates_over_time " <> T.unpack thrName
   estUrl <- readFile "estimates_over_time.url"
   void $ createRecord opts "Plot links" $ 
     object [ "Link" .= estUrl
+           , "Thread name" .= thrName
            , "Link type" .= [String "Estimates over time"]
            , "Last updated" .= curTime
            ]

@@ -56,7 +56,7 @@ with open(f_vis_name + ".cache", 'r') as f_vis:
                 marker = dict(
                         color = colors[i],
                         line = dict(
-                            color = colors[i],
+                            color = 'rgba(58, 71, 80, 1.0)',
                             width = 3)
                     )
 
@@ -81,9 +81,6 @@ with open(f_vis_name + ".cache", 'r') as f_vis:
         barmode='stack',
         title=title,
         legend=dict(xanchor='left',yanchor='bottom',x=-2)
-        # margin=go.Margin(
-        #     t=1000
-        # )
     )
 
     fig = go.Figure(data=traces, layout=layout)

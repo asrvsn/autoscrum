@@ -107,15 +107,16 @@ main = do
 
         -- (4) upload estimates
         putStrLn "[6] upload estimates"
-        uploadEstimates curTime dashOpts schedSummary
+        let parentThrName = threadName $ vSelect (threads base0) parentThrId
+        uploadEstimates curTime dashOpts schedSummary parentThrName
 
         -- (5) upload gantt chart
         putStrLn "[7] upload gantt chart"
-        uploadGantt curTime dashOpts (threads base2) (developers base2) (sched50 schedSummary)
+        uploadGantt curTime dashOpts (threads base2) (developers base2) parentThrName (sched50 schedSummary)
 
         -- (6) upload estimates over time chart
         putStrLn "[8] upload estimates over time chart"
-        uploadEstimateHistory curTime dashOpts
+        uploadEstimateHistory curTime dashOpts parentThrName
 
       "lookup record" -> do
         cmdOptions [
