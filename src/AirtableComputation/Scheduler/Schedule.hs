@@ -32,16 +32,16 @@ import qualified Data.HashMap.Strict as Map
 import qualified Data.ByteString.Lazy.Char8 as BLC
 import           Data.Aeson
 import           Data.Maybe (isJust, catMaybes)
-import           Data.Foldable (find)
+import           Data.Foldable (find, foldl')
 import           Data.Function (on)
 import           Data.List (minimumBy, sortBy)
 import           Data.Monoid
 import           Control.Monad.State
 import           Airtable.Table
 
-import Types
 import Missing
 import AirtableIO.TasksBase
+import AirtableIO.TasksBaseValidate
 import AirtableComputation.Scheduler.Features
 import AirtableComputation.BayesNet
 import AirtableComputation.Tasks
@@ -55,7 +55,7 @@ instance Debug (Table Developer, Schedule) where
        prettyRows 20 (map getRow $ Map.toList s)
     ++ "\nTOTAL RUNTIME: " ++ show (getRuntime s)
     where
-      getRow (devId, timeline) = [
+      getRow (devId, _) = [
           debug (vSelect devTbl (getDevId devId))
         , "working: " ++ show (getWorkingTime s devId)
         , "blocked: " ++ show (getBlockedTime s devId) 
@@ -88,12 +88,12 @@ sampledScheduleSummary :: HasCallStack
                        -> TasksBase
                        -> IO ScheduleSummary
 sampledScheduleSummary nSamples prms base = do
-  let bn = tasksBayesNet thrTbl cntTbl 
+  let bn = tasksBayesNet base
   schedules <- forM [1..nSamples] $ \i -> do
     putStrLn $ "Sample " <> show i <> " ..."
-    thrTbl_ <- sampleTable bn thrTbl
-    let (blkTbl_, cntTbl_) = reconcileWithThreads thrTbl_ blkTbl cntTbl 
-    let sched = schedule bn thrTbl_ blkTbl_ cntTbl_ devTbl tagTbl velTbl prms
+    thrTbl_ <- sampleTable bn (threads base)
+    let base' = reconcileWithThreads thrTbl_ base
+    let sched = schedule bn base' prms
     putStrLn $ "est. runtime: " <> show (getRuntime sched)
     return $! sched 
 
@@ -114,16 +114,17 @@ initSchedule :: TasksBase -> Schedule
 initSchedule base = 
   let getAssignee thr = case (threadAssignee thr) of 
         Nothing -> error $ "initSchedule: expected " ++ show thr ++ " to be assigned"
-        Just d  -> d
+        Just d  -> DevID d
+      devs = selectAllKeys (developers base)
       schedule0   = Map.fromList $ zip (map DevID devs) (repeat [])
       preAssigned = 
-        catMaybes $ for (selectAll (threads base)) $ 
-          \(thrId, thr) -> 
-            case (threadStatus thr) of 
+        catMaybes $ (flip map) (selectAll (threads base)) $ 
+          \rec -> 
+            case (threadStatus (recordObj rec)) of 
               Nothing -> Nothing
               Just s  -> 
                 case s of 
-                  WorkingOn   -> Just (thrId, getAssignee thr)
+                  WorkingOn   -> Just (ThreadID (recordId rec), getAssignee (recordObj rec))
                   _           -> Nothing
 
   in foldl' (\s (t,d) -> assign base t d s) schedule0 preAssigned
@@ -162,16 +163,19 @@ schedule bn base prms =
         selectKeyWhere thrTbl $ \rec -> 
           let thr     = recordObj rec
               thrId   = recordId rec
-              blocks  = Set.fromList (getBlockingThreads blkTbl thrTbl $ ThreadID thrId) 
-          in    blocks `Set.isSubsetOf` completed
+              blockThrs  = Set.fromList (getBlockingThreads blkTbl thrTbl $ ThreadID thrId) 
+          in    blockThrs `Set.isSubsetOf` completed
              && ThreadID thrId `Set.notMember` completed
              && not (threadFinished thr)
+      where
+        thrTbl = threads base 
+        blkTbl = blocks base 
 
     assignmentFeatures :: ThreadID -> DevID -> State Schedule Features
     assignmentFeatures thrId devId = do
       -- (1) time to task unblocked (by dev availability as well as blocking threads)
-      t_task <- getTaskAvailability thrId
-      t_dev  <- getDevAvailability devId
+      t_task <- gets $ \s -> getTaskAvailability base s thrId
+      t_dev  <- gets $ \s -> getDevAvailability s devId
       let t_unblocked = max t_task t_dev
       -- (2) dev completion time
       let t_elapsed = taskCompletionTime base thrId devId   
@@ -183,7 +187,7 @@ schedule bn base prms =
         }
 
 assign :: TasksBase -> ThreadID -> DevID -> Schedule -> Schedule 
-assign base thrId devId mp = do
+assign base thrId devId mp = 
   let dt_task_  = taskCompletionTime base thrId devId
     -- TODO(anand) deal with negative completion times (bad data) better.
       dt_task   = if dt_task_ > 0 then dt_task_ else 1
@@ -198,7 +202,7 @@ getTaskAvailability :: HasCallStack => TasksBase -> Schedule -> ThreadID -> Doub
 getTaskAvailability base mp thrId = 
   let blkThrs   = getBlockingThreads (blocks base) (threads base) thrId
       blkTimes  = map (getCompletedTaskTime mp) blkThrs
-  return $ case blkTimes of 
+  in case blkTimes of 
     [] -> 0
     _  -> assertPositive "blkTimes" blkTimes $ maximum blkTimes
 
@@ -206,7 +210,7 @@ getDevAvailability :: HasCallStack => Schedule -> DevID -> Double
 getDevAvailability mp devId = 
   case mp `lookup` devId of
     []   -> 0
-    t:ts -> assertPositive "devAvailability" mp $ fst t 
+    t:_  -> assertPositive "devAvailability" mp $ fst t 
 
 getCompletedTaskTime :: Schedule -> ThreadID -> Double
 getCompletedTaskTime mp thrId = 

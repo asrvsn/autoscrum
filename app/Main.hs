@@ -4,8 +4,8 @@ module Main where
 
 import Constants
 import AirtableComputation.Scheduler.Schedule 
-import AirtableComputation.Tasks
 import AirtableIO.TasksBase
+import AirtableIO.TasksBaseValidate
 import AirtableIO.DashboardUpdate
 import FileIO
 import Missing
@@ -16,6 +16,7 @@ import Data.Monoid
 import Airtable.Table
 import Airtable.Query
 import Text.Read (readMaybe)
+import qualified Data.Text as T
 
 default_sched_params :: ScheduleParams
 default_sched_params = ScheduleParams {
@@ -57,7 +58,7 @@ main = do
 
         -- (-1) data validation
         putStrLn "[1] Data validation"
-        tasksBase1 <- runValidator tasksBase0
+        base1 <- runValidator tasksBase0
 
         -- (0) get current time
         putStrLn "[2] get current time"
@@ -91,18 +92,18 @@ main = do
 
         let thrGetter = do  putStrLn "Enter thread name for schedule computation"
                             parentThrName <- getLine
-                            case findThr (threads tasksBase1) parentThrName of  
+                            case findThr (threads base1) (ThreadName $ T.pack parentThrName) of  
                               Just parentThrId -> return parentThrId
                               Nothing -> do
                                 putStrLn "Couldn't find thread ID"
                                 thrGetter 
         parentThrId <- thrGetter
-        let tasksBase2 = selectDescendantsOf parentThreadId tasksbase1 
+        let base2 = selectDescendantsOf parentThrId base1 
         
-        schedSummary <- sampledScheduleSummary n_schedule_samples prms tasksBase2
+        schedSummary <- sampledScheduleSummary n_schedule_samples prms base2
 
         putStrLn "\nMedian schedule:"
-        putStrLn $ debug (developers tasksBase1, sched50 schedSummary)
+        putStrLn $ debug (developers base2, sched50 schedSummary)
 
         -- (4) upload estimates
         putStrLn "[6] upload estimates"
@@ -110,7 +111,7 @@ main = do
 
         -- (5) upload gantt chart
         putStrLn "[7] upload gantt chart"
-        uploadGantt curTime dashOpts (threads tasksBase1) (developers tasksBase1) (sched50 schedSummary)
+        uploadGantt curTime dashOpts (threads base2) (developers base2) (sched50 schedSummary)
 
         -- (6) upload estimates over time chart
         putStrLn "[8] upload estimates over time chart"
@@ -155,6 +156,9 @@ main = do
               resp <- getLine
               velTbl <- getRecords opts "Velocities" :: IO (Table Velocity)
               putStrLn . show $ selectMaybe velTbl resp
+            _ -> putStrLn "That's not an option"
+
+      _ -> putStrLn "That's not an option"
 
   putStrLn "===== EXITED ====="
 

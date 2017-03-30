@@ -10,9 +10,16 @@ module AirtableIO.TasksBaseValidate
   , 
   ) where
 
-import Control.Monad.State
+import qualified Data.HashMap.Strict as Map
+import qualified Data.Text as T
+import           Control.Monad.State
+import           Airtable.Table
+import           Data.Foldable (foldl')
+import           Data.Maybe (catMaybes)
 
 import AirtableIO.TasksBase
+
+-- * Types
 
 type ValidateM = StateT (TasksBase, [ValidateError]) IO
 
@@ -52,23 +59,22 @@ modifyBase f = modify $ \(b, errs) -> (f b, errs)
 showValidateError :: TasksBase -> ValidateError -> String
 showValidateError base = \case
   ThrErr rec err -> 
-    "error in {" ++ (take 40 . threadName . vSelect (threads base)) rec ++ "}: " ++ err
+    "error in {" ++ (take 40 . showThreadName . threadName . vSelect (threads base)) rec ++ "}: " ++ err
+  where
+    showThreadName (ThreadName t) = T.unpack t 
 
 -- * validators 
 
 positiveStoryPtFilter :: ValidateM ()
 positiveStoryPtFilter = modifyBase $ \b -> 
-  let thrTbl = threads b
-      blkTbl = blocks b
-      cntTbl = containments b
-      thrTbl_ = deleteWhere thrTbl $ \rec -> 
+  let thrTbl_ = deleteWhere (threads b) $ \rec -> 
                    not (threadAssignable (recordObj rec))
                 || threadStoryPts (recordObj rec) <= 0
   in reconcileWithThreads thrTbl_ b
 
 threadStatusFilter :: ValidateM ()
 threadStatusFilter = modifyBase $ \b -> 
-  let thrTbl_ = deleteWhere (threads base) $ \rec -> 
+  let thrTbl_ = deleteWhere (threads b) $ \rec -> 
                   case threadStatus (recordObj rec) of 
                     Nothing -> False
                     Just s  -> 
@@ -81,9 +87,11 @@ threadStatusFilter = modifyBase $ \b ->
 
 threadStatusGuard :: ValidateM ()
 threadStatusGuard = do
-  thrs <- gets (selectAll . threads)
-  forM_ thrs $ \(thrId, thr) -> 
-    let shouldBeAssigned = 
+  thrs <- gets (selectAll . threads . fst)
+  forM_ thrs $ \rec -> 
+    let thr = recordObj rec
+        thrId = recordId rec
+        shouldBeAssigned = 
           case (threadAssignee thr) of 
             Nothing -> validateErr $ ThrErr thrId "Had a WorkingOn, Blocked, or OnPause status but had no assignee"
             Just _  -> okay
@@ -124,6 +132,7 @@ getImpossibleThreads base =
     thrTbl = threads base
     velTbl = velocities base
     devTbl = developers base
+    tagTbl = tags base
     completionImpossibility thrId = 
       let thr = vSelect thrTbl thrId
           getMultipliers devId =     devMultipliersForTask velTbl devId thr 
@@ -145,6 +154,6 @@ selectDescendantsOf thrId base =
     worker thrTbl_ []     = thrTbl_ 
     worker thrTbl_ thrIds = 
       let childIds  = concatMap (getChildren (containments base)) thrIds
-          childThrs = map (vSelect (threads base)) childIds 
-          thrTbl_'  = foldr (uncurry (insert thrTbl_)) thrTbl_ (zip childIds childThrs)
+          childThrs = map (select (threads base)) childIds 
+          thrTbl_'  = foldl' (\t (k,v) -> insert t (getThreadId k) v) thrTbl_ (zip childIds childThrs)
       in worker thrTbl_' childIds

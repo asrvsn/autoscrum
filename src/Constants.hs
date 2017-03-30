@@ -2,9 +2,6 @@
 
 module Constants where
 
-import Data.Text (Text)
-import Data.ByteString (ByteString)
-
 app_id :: String
 app_id = "appfGT5ACymqznlOP"
 

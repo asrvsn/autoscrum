@@ -18,6 +18,7 @@ module AirtableIO.TasksBase
   , Tag(..)
   -- * Threads
   , ThreadName(..)
+  , ThreadStatus(..)
   , Thread(..)
   -- * Containments
   , Containment(..)
@@ -38,6 +39,8 @@ module AirtableIO.TasksBase
   , getBlockages
   , getBlockedThreads
   , getBlockingThreads
+  , devMultipliersForTask
+  , missingMultipliersForTask
   , findThr
   ) where
 
@@ -45,16 +48,14 @@ import           GHC.Generics
 import           Prelude hiding (lookup)
 import           Data.Aeson
 import           Data.Hashable (Hashable)
-import           Data.Set (Set)
 import qualified Data.Set as Set
 import           Data.Text (Text)
 import           Data.Monoid
-import           Control.Concurrent
+import           Control.Concurrent.Async
 import           Airtable.Table
 import           Airtable.Query
 
 import Missing
-import Constants
 
 -- * Constants
 
@@ -136,14 +137,16 @@ data ThreadStatus
   | Done
   | Blocked
   | OnPause
+  deriving ( Show, Read, Eq )
 
 instance FromJSON ThreadStatus where
-  parseJSON = withObject "thread status" $ \case
+  parseJSON = withText "thread status" $ \case
     "Working On" -> return WorkingOn
     "Diffed" -> return Diffed
     "Done" -> return Done
     "Blocked" -> return Blocked
     "On pause" -> return OnPause
+    _ -> fail "thread status was not recognized"
 
 instance ToJSON ThreadStatus where
   toJSON = \case
@@ -184,7 +187,7 @@ instance FromJSON Thread where
       boolField n = n == fromInteger 1
       headMay :: [a] -> Maybe a
       headMay []     = Nothing
-      headMay (x:xs) = Just x
+      headMay (x:_) = Just x
 
 instance ToJSON Thread where
   toJSON thr = object [ "Thread name" .= threadName thr
@@ -288,15 +291,13 @@ instance Debug Developer where
 -- * Retrieval
 
 getTasksBase :: AirtableOptions -> IO TasksBase
-getTasksBase opts = wait =<< 
-  (TasksBase
-    <$> async (getRecords opts "Threads")
-    <*> async (getRecords opts "Blocks")
-    <*> async (getRecords opts "Developers")
-    <*> async (getRecords opts "Containments")
-    <*> async (getRecords opts "Task types")
-    <*> async (getRecords opts "Velocities")
-  )
+getTasksBase opts = runConcurrently $ TasksBase
+  <$> Concurrently (getRecords opts "Threads" <* putStrLn "got threads")
+  <*> Concurrently (getRecords opts "Blocks" <* putStrLn "got blocks")
+  <*> Concurrently (getRecords opts "Developers" <* putStrLn "got developers")
+  <*> Concurrently (getRecords opts "Containments" <* putStrLn "got containments")
+  <*> Concurrently (getRecords opts "Task types" <* putStrLn "got task types")
+  <*> Concurrently (getRecords opts "Velocities" <* putStrLn "got velocities")
 
 -- * Accessors
 
@@ -361,7 +362,21 @@ getBlockingThreads blkTbl thrTbl thrId =
          blockedThread blk == getThreadId thrId
       && not (threadFinished $ vSelect thrTbl thrId)
 
-findThr :: Table Thread -> ThreadID
+devMultipliersForTask :: Table Velocity -> DevID -> Thread -> [Double]
+devMultipliersForTask velTbl devId thr = 
+  map vMultiplier $ 
+    vSelectWhere velTbl $ \vel -> 
+          vTag vel `elem` threadTags thr 
+      &&  DevID (vDeveloper vel) == devId
+
+missingMultipliersForTask :: Table Velocity -> Table Tag -> Developer -> Thread -> [Double]
+missingMultipliersForTask velTbl tagTbl dev thr = 
+  map (tagMultiplierIfMissing . recordObj) $ 
+    selectWhere tagTbl $ \rec ->
+          recordId rec `elem` threadTags thr
+      &&  TagID (recordId rec) `notElem` devTags velTbl dev
+
+findThr :: Table Thread -> ThreadName -> Maybe ThreadID
 findThr thrTbl thrName = case result of 
   [thrId] -> Just $ ThreadID thrId
   _ -> Nothing

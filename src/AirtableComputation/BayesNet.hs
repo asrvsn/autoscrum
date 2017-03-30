@@ -8,14 +8,9 @@ module AirtableComputation.BayesNet
   ) where
 
 import           GHC.Stack
-import           Bayes (SBN)
 import           Bayes.Factor 
 import           Bayes.Factor.CPT (CPT)
-import           Bayes.BayesianNetwork
-import           Bayes.FactorElimination ( nodeComparisonForTriangulation
-                                         , createJunctionTree
-                                         , changeEvidence
-                                         , posterior
+import           Bayes.FactorElimination ( posterior
                                          , JunctionTree
                                          )
 import           Airtable.Table
@@ -63,6 +58,6 @@ sampleTable bn tbl = do
             if outcome then Just a else Nothing 
             
     unfairCoin :: Double -> IO Bool
-    unfairCoin p = flip <$> getStdRandom (randomR (1,100))
+    unfairCoin p = flipCoin <$> getStdRandom (randomR (1,100))
       where
-        flip r = r <= (p * 100) 
+        flipCoin r = r <= (p * 100) 
