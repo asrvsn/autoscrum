@@ -40,6 +40,7 @@ import           Control.Monad.State
 import           Airtable.Table
 
 import Missing
+import Constants
 import AirtableIO.TasksBase
 import AirtableIO.TasksBaseValidate
 import AirtableComputation.Scheduler.Features
@@ -120,12 +121,18 @@ initSchedule base =
       preAssigned = 
         catMaybes $ (flip map) (selectAll (threads base)) $ 
           \rec -> 
-            case (threadStatus (recordObj rec)) of 
-              Nothing -> Nothing
+            let keep    = Just (ThreadID (recordId rec), getAssignee (recordObj rec))
+                discard = Nothing
+                
+            in case (threadStatus (recordObj rec)) of 
+              Nothing -> discard 
               Just s  -> 
                 case s of 
-                  WorkingOn   -> Just (ThreadID (recordId rec), getAssignee (recordObj rec))
-                  _           -> Nothing
+                  WorkingOn   -> keep
+                  Diffed      -> discard
+                  Done        -> discard
+                  Blocked     -> keep
+                  OnPause     -> keep
 
   in foldl' (\s (t,d) -> assign base t d s) schedule0 preAssigned
 
@@ -250,7 +257,11 @@ rescaleFeatures fs = map (f_unop fromNaN . (\x -> (x - x_min) / (x_max - x_min))
 -- * Schedule accessors
 
 getRuntime :: HasCallStack => Schedule -> Double
-getRuntime = maximumOr (error "schedule is empty") . map (headOr 0 . map fst) . Map.elems
+getRuntime = 
+    (est_fudge_factor *) 
+  . maximumOr (error "schedule is empty") 
+  . map (headOr 0 . map fst) 
+  . Map.elems
 
 getWorkingTime :: Schedule -> DevID -> Double
 getWorkingTime mp devId = 

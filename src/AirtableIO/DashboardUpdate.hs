@@ -14,6 +14,7 @@ import           Data.Function (on)
 import           Data.List (sortBy)
 import           Data.Aeson
 import           Data.Monoid
+import           Data.Maybe (isJust)
 import qualified Data.Text as T
 import qualified Data.HashMap.Strict as Map
 import           Data.Foldable (forM_)
@@ -129,15 +130,20 @@ uploadEstimateHistory curTime opts (ThreadName thrName) = do
     toPyTimeEst est = (runDate est, est20 est, est50 est, est80 est)
 
 uploadComputedSchedule :: TasksBase -> UTCTime -> AirtableOptions -> ThreadName -> Schedule -> IO ()
-uploadComputedSchedule base curTime opts thrName sched = do
-  forM_ entries $ \(dev, timeline) -> do
-    forM_ timeline $ \(elapsed, thread) -> 
-      createRecord opts "Computed schedules" $ 
-        object [ "Parent thread" .= thrName
-               , "Task" .= maybe (ThreadName "Blocked") id thread
-               , "Developer" .= dev
-               , "Runtime" .= elapsed
-               , "Date computed" .= curTime]
+uploadComputedSchedule base curTime opts thrName sched = 
+  forM_ entries $ \(devId, timeline) -> 
+    forM_ timeline $ \(elapsed, thrId) -> 
+      let withThr def f = maybe def (f . vSelect (threads base)) thrId 
+          preassigned   = withThr False (isJust . threadAssignee)
+          task          = withThr (ThreadName "Blocked") threadName
+      in 
+        createRecord opts "Computed schedules" $ 
+          object [ "Parent thread" .= thrName
+                 , "Preassigned?" .= preassigned 
+                 , "Task" .= task
+                 , "Developer" .= devName (vSelect (developers base) devId)
+                 , "Runtime" .= elapsed
+                 , "Date computed" .= curTime
+                 ]
   where
-    entries = Map.toList (getVis vis)
-    vis = schedule2vis (threads base) (developers base) sched
+    entries = Map.toList (convertToDiffedRuntime sched)

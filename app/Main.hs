@@ -96,6 +96,10 @@ main = do
               (return default_sched_params) 
               enterParameters
 
+        yn ("use default (" ++ show est_fudge_factor ++ ") fudge factor?")
+           (return ())
+           (putStrLn "Change it in Constants.hs, and recompile" >> abort)
+
         putStrLn "\nComputing schedule using parameters:\n"
         putStrLn $ debug prms
         putStrLn "...\n"
