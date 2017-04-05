@@ -70,12 +70,12 @@ with open(f_vis_name + ".cache", 'r') as f_vis:
         fill='tozeroy',
         mode='lines+markers+text',
         line=dict(width=0.5, color='rgb(111, 231, 219)'),
-        name='Dev completion time (days)',
+        name='Days to completion',
         textposition='top'
     )
     data = [trace]
 
-    title = 'Completion estimate for {' + thr_name + '}'
+    title = 'Completion estimate for {' + thr_name + '}, with 2x fudge factor'
     layout = go.Layout(
         showlegend=True,
         yaxis=dict(
