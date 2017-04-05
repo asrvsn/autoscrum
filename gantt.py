@@ -75,12 +75,9 @@ with open(f_vis_name + ".cache", 'r') as f_vis:
     title = 'AlphaSheets dev timeline (' + my_id + ')'
 
     layout = go.Layout(
-        autosize=False,
-        width=1500,
-        height=1000,
+        showlegend=False,
         barmode='stack',
         title=title,
-        legend=dict(xanchor='left',yanchor='bottom',x=-2)
     )
 
     fig = go.Figure(data=traces, layout=layout)
