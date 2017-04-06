@@ -45,7 +45,7 @@ main = do
     ] $ \case
 
       "first-time setup (run this if you haven't)" -> do
-        mightNeedSudo "pip install plotly shortid numpy"
+        mightNeedSudo "pip install plotly json shortid python-dateutil"
         system "mkdir ~/.plotly"
         system "cp .plotly/.credentials ~/.plotly/"
         return ()
@@ -75,15 +75,17 @@ main = do
         base2 <- runValidator base1
 
         -- (1) upload diff in threads table
-        let uploadDiff = do putStrLn "[3] upload diff in threads table"
-                            oldThrTbl <- retrieveRemote "Threads_table_old" 
-                            case oldThrTbl of
-                              Left l -> do
-                                putStrLn l
-                                putStrLn "Not uploading task status changes."
-                              Right r -> 
-                                uploadTasksDiff curTime dashOpts r (threads base0) (developers base0)
-        yn "Upload diff?" uploadDiff (putStrLn "not uploading.")
+        yn  "Upload diff?" 
+            (putStrLn "not uploading.") 
+            $ do  
+              putStrLn "[3] upload diff in threads table"
+              oldThrTbl <- retrieveRemote "Threads_table_old" 
+              case oldThrTbl of
+                Left l -> do
+                  putStrLn l
+                  putStrLn "Not uploading task status changes."
+                Right r -> 
+                  uploadTasksDiff curTime dashOpts r (threads base0) (developers base0)
 
         -- (2) persist new threads table
         putStrLn "[4] persist new threads table"
@@ -93,12 +95,12 @@ main = do
         putStrLn "[5] compute schedule estimations"
         prms <- ynCached "sched_params" $ 
           yn  "use default parameters?" 
-              (return default_sched_params) 
               enterParameters
+              $ return default_sched_params
 
         yn ("use default (" ++ show est_fudge_factor ++ ") fudge factor?")
-           (return ())
            (putStrLn "Change it in Constants.hs, and recompile" >> abort)
+           $ return ()
 
         putStrLn "\nComputing schedule using parameters:\n"
         putStrLn $ debug prms
@@ -114,19 +116,28 @@ main = do
         let parentThrName = threadName $ vSelect (threads base0) parentThrId
         uploadEstimates curTime dashOpts schedSummary parentThrName
 
-        -- (5) upload gantt chart
-        putStrLn "[7] upload gantt chart"
-        uploadGantt curTime dashOpts (threads base2) (developers base2) parentThrName (sched50 schedSummary)
+        yn "Upload plots?" (return ()) $ do
+          putStrLn "[6.5] remove old plot links"
+          removeOldPlotLinks dashOpts parentThrName
 
-        -- (6) upload estimates over time chart
-        putStrLn "[8] upload estimates over time chart"
-        uploadEstimateHistory curTime dashOpts parentThrName
+          -- (5) upload gantt chart
+          putStrLn "[7] upload gantt chart"
+          uploadGantt curTime dashOpts (threads base2) (developers base2) parentThrName (sched50 schedSummary)
 
+          -- (6) upload estimates over time chart
+          putStrLn "[8] upload estimates over time chart"
+          uploadEstimateHistory curTime dashOpts parentThrName
+          
         -- (7) upload computed schedule
         putStrLn "[9] upload computed schedule"
         yn  "upload computed schedule?"
-            (uploadComputedSchedule base0 curTime dashOpts parentThrName (sched50 schedSummary))
             (return ())
+            $ uploadComputedSchedule 
+                base0   
+                curTime 
+                dashOpts 
+                parentThrName 
+                (sched50 schedSummary)
 
       "lookup record" -> do
         cmdOptions [

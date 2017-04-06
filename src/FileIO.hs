@@ -52,7 +52,7 @@ retrieveRemote = retrieve -- TODO(anand)
 -- * Stdin I/O
 
 yn :: String -> IO a -> IO a -> IO a
-yn ask y n = do
+yn ask n y = do
   putStrLn $ "\n" ++ ask ++ " (Y/N)"
   resp <- getLine
   case resp of 
@@ -60,7 +60,7 @@ yn ask y n = do
     "Y" -> y
     "n" -> n
     "N" -> n
-    _   -> yn ask y n
+    _   -> yn ask n y
 
 ynCached :: (ToJSON a, FromJSON a) => String -> IO a -> IO a
 ynCached fname n = do
@@ -72,7 +72,7 @@ ynCached fname n = do
       persist fname a
       return a
     Right r -> 
-      yn ("Use cached " <> fname <> "?") (return r) n
+      yn ("Use cached " <> fname <> "?") n (return r) 
 
 cmdOptions :: [String] -> (String -> IO ()) -> IO ()
 cmdOptions opts f = do

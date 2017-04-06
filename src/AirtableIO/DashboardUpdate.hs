@@ -7,6 +7,7 @@ module AirtableIO.DashboardUpdate
   , uploadGantt
   , uploadEstimateHistory
   , uploadComputedSchedule
+  , removeOldPlotLinks
   ) where
 
 import           Data.Time.Clock (UTCTime)
@@ -83,6 +84,14 @@ uploadTasksDiff curTime opts thrTbl_ thrTbl devTbl =
                    , "Date recorded" .= curTime
                    ]
 
+removeOldPlotLinks :: AirtableOptions -> ThreadName -> IO ()
+removeOldPlotLinks opts (ThreadName thrName) = do
+  plotLinks <- getRecords opts "Plot links"
+  forM_ (selectAll plotLinks) $ \rec -> 
+    if plotThread (recordObj rec) == thrName
+      then deleteRecord opts "Plot links" (recordId rec)
+      else pure ()
+
 uploadEstimates :: UTCTime -> AirtableOptions -> ScheduleSummary -> ThreadName -> IO ()
 uploadEstimates curTime opts summary (ThreadName thrName) = 
   void $ createRecord opts "Time estimations" $ 
@@ -101,16 +110,17 @@ uploadGantt :: UTCTime
             -> ThreadName
             -> Schedule
             -> IO ()
-uploadGantt curTime opts thrTbl devTbl thrName sched = do
+uploadGantt curTime opts thrTbl devTbl (ThreadName thrName) sched = do
   persist "sched_vis" (schedule2vis thrTbl devTbl sched)
   system "python gantt.py sched_vis"
   ganttUrl <- readFile "sched_vis.url"
   void $ createRecord opts "Plot links" $ 
-    object [ "Parent thread" .= thrName
-           , "Link" .= ganttUrl
-           , "Link type" .= [String "Median gantt chart"]
-           , "Last updated" .= curTime
-           ]
+    toJSON $ PlotLink 
+      { plotThread = thrName
+      , plotLink = ganttUrl
+      , plotType = MedGanttChart
+      , plotLastUpdated = curTime
+      }
 
 uploadEstimateHistory :: UTCTime -> AirtableOptions -> ThreadName -> IO ()
 uploadEstimateHistory curTime opts (ThreadName thrName) = do
@@ -120,11 +130,12 @@ uploadEstimateHistory curTime opts (ThreadName thrName) = do
   system $ "python estimates.py estimates_over_time " <> T.unpack thrName
   estUrl <- readFile "estimates_over_time.url"
   void $ createRecord opts "Plot links" $ 
-    object [ "Link" .= estUrl
-           , "Parent thread" .= thrName
-           , "Link type" .= [String "Estimates over time"]
-           , "Last updated" .= curTime
-           ]
+    toJSON $ PlotLink 
+      { plotThread = thrName 
+      , plotLink = estUrl
+      , plotType = EstOverTime
+      , plotLastUpdated = curTime
+      }
   where
     sortByTime = sortBy (compare `on` runDate)
     toPyTimeEst est = (runDate est, est20 est, est50 est, est80 est)

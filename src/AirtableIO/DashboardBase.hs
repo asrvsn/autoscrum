@@ -1,4 +1,5 @@
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE LambdaCase #-}
 
 module AirtableIO.DashboardBase 
   ( 
@@ -8,6 +9,9 @@ module AirtableIO.DashboardBase
   , tableCUDHistory
   -- * Time estimations
   , TimeEstimation(..)
+  -- * Plot links
+  , PlotLink(..)
+  , PlotType(..)
   ) where
 
 import           Data.Aeson 
@@ -74,3 +78,43 @@ instance ToJSON TimeEstimation where
            , "50% estimate" .= est50 tEst
            , "80% estimate" .= est80 tEst
            ] 
+
+-- * Plot links
+
+data PlotType 
+  = MedGanttChart
+  | EstOverTime
+
+instance FromJSON PlotType where
+  parseJSON = withText "plot type" $ \case
+    "Median gantt chart"  -> pure MedGanttChart
+    "Estimates over time" -> pure EstOverTime
+    _ -> fail "plot type not found"
+
+instance ToJSON PlotType where
+  toJSON = \case 
+    MedGanttChart -> String "Median gantt chart"
+    EstOverTime   -> String "Estimates over time"
+
+data PlotLink = PlotLink
+  { plotThread :: Text
+  , plotLink :: String
+  , plotType :: PlotType 
+  , plotLastUpdated :: UTCTime
+  }
+
+instance FromJSON PlotLink where
+  parseJSON = withObject "plot link" $ \v -> do
+    [linkType] <- v .: "Link type"
+    PlotLink <$> v .: "Parent thread"
+             <*> v .: "Link"
+             <*> pure linkType
+             <*> v .: "Last updated"
+
+instance ToJSON PlotLink where
+  toJSON plt = 
+    object [ "Parent thread" .= plotThread plt
+           , "Link" .= plotLink plt
+           , "Link type" .= [plotType plt]
+           , "Last updated" .= plotLastUpdated plt
+           ]
