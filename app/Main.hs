@@ -124,7 +124,9 @@ main = do
 
         -- (7) upload computed schedule
         putStrLn "[9] upload computed schedule"
-        uploadComputedSchedule base0 curTime dashOpts parentThrName (sched50 schedSummary)
+        yn  "upload computed schedule?"
+            (uploadComputedSchedule base0 curTime dashOpts parentThrName (sched50 schedSummary))
+            (return ())
 
       "lookup record" -> do
         cmdOptions [

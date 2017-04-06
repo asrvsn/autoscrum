@@ -75,7 +75,7 @@ with open(f_vis_name + ".cache", 'r') as f_vis:
     )
     data = [trace]
 
-    title = 'Completion estimate for {' + thr_name + '}, with 2x fudge factor'
+    title = 'Completion estimate for {' + thr_name + '}, with 3x fudge factor'
     layout = go.Layout(
         showlegend=True,
         yaxis=dict(

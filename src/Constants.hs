@@ -21,4 +21,4 @@ n_schedule_samples :: Int
 n_schedule_samples = 1
 
 est_fudge_factor :: Double
-est_fudge_factor = 2.0
+est_fudge_factor = 3.0
