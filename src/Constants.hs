@@ -2,14 +2,17 @@
 
 module Constants where
 
+-- | Source Airtable Base from which to pull data (tasks, developers, etc.)
 app_id :: String
-app_id = "appfGT5ACymqznlOP"
+app_id = undefined
 
+-- | Destination Airtable Base to send schedule computation to
 dash_app_id :: String
-dash_app_id = "app2PQQ9xjg5Mleq6"
+dash_app_id = undefined
 
+-- | Airtable API key
 api_key :: String
-api_key = "keyDSaC5Xv0BoKTSD"
+api_key = undefined
 
 cache_ext :: String
 cache_ext = ".cache"
