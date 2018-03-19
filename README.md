@@ -10,7 +10,8 @@ The tool infers marginal probabilities of task inclusion in a sprint by modeling
 
 It then generates a Gantt chart like this: 
 
-<iframe width="900" height="800" frameborder="0" scrolling="no" src="//plot.ly/~anandtech1532/102.embed?share_key=YnKO7dsUNQ2TY9VWaa7p8i"></iframe>
+<a href="https://plot.ly/~anandtech1532/102/?share_key=YnKO7dsUNQ2TY9VWaa7p8i" target="_blank" title="marker-h-bar-YvIbIIx0" style="display: block; text-align: center;"><img src="https://plot.ly/~anandtech1532/102.png?share_key=YnKO7dsUNQ2TY9VWaa7p8i" alt="marker-h-bar-YvIbIIx0" style="max-width: 100%;width: 600px;"  width="600" onerror="this.onerror=null;this.src='https://plot.ly/404.png';" /></a>
+
 
 We used this for a while to augment our sprint planning. Eventually we replaced this solution by just having more architecture meetings, which tended to get everyone on the same page better. For us it was a failed experiment, but you may find interesting use cases for this tool. 
 
